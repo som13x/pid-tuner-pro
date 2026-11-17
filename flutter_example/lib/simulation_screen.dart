@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:pid_tuner_pro_core/auto_tune.dart';
+import 'package:pid_tuner_pro_core/dcs_controller_profiles.dart';
 import 'package:pid_tuner_pro_core/centum_pid_simulator.dart';
 import 'package:pid_tuner_pro_core/closed_loop_studio.dart';
 
@@ -24,7 +25,8 @@ List<Map<String, dynamic>> _simulateWorker(Map<String, double> p) {
 
 class SimulationScreen extends StatefulWidget {
   final Map<String, double>? initialModel;
-  const SimulationScreen({super.key, this.initialModel});
+  final DcsControllerProfile? profile;
+  const SimulationScreen({super.key, this.initialModel, this.profile});
   @override
   State<SimulationScreen> createState() => _SimulationScreenState();
 }
@@ -83,6 +85,9 @@ class _SimulationScreenState extends State<SimulationScreen> {
     appBar: AppBar(title: const Text('Closed-Loop Simulation')),
     body: ListView(padding: const EdgeInsets.all(16), children: [
       const Text('Модель FOPDT и параметры PID', style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold)),
+      if (widget.profile != null) Text('Профиль проекта: ' + widget.profile!.title +
+        '. Симуляция остаётся универсальной, а не моделью фирменного блока.',
+        style: const TextStyle(color: Colors.deepOrange)),
       const SizedBox(height: 12),
       Wrap(spacing: 10, runSpacing: 12, children: [
         field('k', 'K (%/% )'), field('tau', 'T, с'), field('delay', 'L, с'),
@@ -116,7 +121,7 @@ class _SimulationScreenState extends State<SimulationScreen> {
           child: CustomPaint(painter: _SimulationPainter(results!, showMv))))),
         const SizedBox(height: 10),
         const Text('Сигналы нормированы в % шкалы. Возмущение добавляется к PV. '
-          'Расчёт является приближённой моделью, не эмулятором прошивки Yokogawa CENTUM VP.'),
+          'Расчёт является приближённой моделью, не эмулятором PID-блоков Yokogawa, Siemens или ABB.'),
       ],
     ]),
   );

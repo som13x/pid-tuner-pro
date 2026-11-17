@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pid_tuner_pro_core/auto_tune.dart';
+import 'package:pid_tuner_pro_core/dcs_controller_profiles.dart';
 import 'main.dart' show AutoTuneScreen, StepTestScreen;
 import 'package:pid_tuner_pro_core/step_identification.dart';
 import 'stability_screen.dart' show StabilityScreen;
@@ -117,23 +118,40 @@ class _ProjectHomeState extends State<ProjectHome> {
   Future<void> _create() async {
     final tag = TextEditingController();
     final description = TextEditingController();
+    var profile = DcsProfiles.yokogawaCentumVp;
     final result = await showDialog<bool>(context: context, builder: (context) =>
-      AlertDialog(title: const Text('Новый контур'), content: Column(
+      StatefulBuilder(builder: (context, refreshDialog) => AlertDialog(title: const Text('Новый контур'), content: Column(
         mainAxisSize: MainAxisSize.min, children: [
           TextField(controller: tag, decoration: const InputDecoration(labelText: 'Тег (например FIC-80B)')),
           TextField(controller: description, decoration: const InputDecoration(labelText: 'Описание')),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            initialValue: profile.id, isExpanded: true,
+            decoration: const InputDecoration(labelText: 'Профиль DCS'),
+            items: [
+              for (final p in DcsProfiles.all)
+                DropdownMenuItem(value: p.id, child: Text(p.title,
+                  overflow: TextOverflow.ellipsis)),
+            ],
+            onChanged: (id) {
+              if (id != null) refreshDialog(() => profile = DcsProfiles.byId(id));
+            },
+          ),
+          const SizedBox(height: 8),
+          const Text('Только пересчёт PB/GAIN для нормированного PI. '
+              'Не является эмулятором DCS.', style: TextStyle(fontSize: 12)),
         ]), actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Отмена')),
           FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Создать')),
-        ]));
+        ])));
     if (!mounted || result != true || tag.text.trim().isEmpty || _store == null) {
       tag.dispose(); description.dispose(); return;
     }
     final now = DateTime.now().toUtc();
     final project = LoopProject(
       id: now.microsecondsSinceEpoch.toString(), tag: tag.text.trim(),
-      description: description.text.trim(), vendor: 'Yokogawa CENTUM VP',
-      controllerBlock: 'PID', createdAt: now);
+      description: description.text.trim(), vendor: profile.storedVendor,
+      controllerBlock: profile.storedBlock, createdAt: now);
     tag.dispose(); description.dispose();
     try {
       final next = [..._projects, project];
@@ -141,6 +159,54 @@ class _ProjectHomeState extends State<ProjectHome> {
       if (mounted) setState(() => _projects = next);
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка сохранения: $e')));
+    }
+  }
+
+  Future<void> _changeProfile(LoopProject project) async {
+    final current = DcsProfiles.forProject(project.vendor, project.controllerBlock);
+    var profile = current ?? DcsProfiles.yokogawaCentumVp;
+    final approved = await showDialog<bool>(context: context,
+      builder: (ctx) => StatefulBuilder(builder: (context, refreshDialog) =>
+        AlertDialog(
+          title: Text('Профиль DCS · ' + project.tag),
+          content: SingleChildScrollView(child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Текущий: ' + project.vendor + ' · ' + project.controllerBlock),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<String>(
+                initialValue: profile.id, isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Профиль'),
+                items: [
+                  for (final p in DcsProfiles.all)
+                    DropdownMenuItem(value: p.id, child: Text(p.title,
+                      overflow: TextOverflow.ellipsis)),
+                ],
+                onChanged: (id) {
+                  if (id != null) refreshDialog(() => profile = DcsProfiles.byId(id));
+                },
+              ),
+              const SizedBox(height: 12),
+              const Text('Изменение профиля не меняет K/T/L и прошлые отчёты. '
+                  'Перед применением настроек проверьте блок, алгоритм, '
+                  'масштабирование PV/MV и направление действия.'),
+            ],
+          )),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Отмена')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Сохранить профиль')),
+          ],
+        )));
+    if (!mounted || approved != true) return;
+    try {
+      await _update(project, project.withControllerProfile(
+        vendorName: profile.storedVendor, blockName: profile.storedBlock));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Ошибка изменения профиля: $e')));
     }
   }
 
@@ -187,6 +253,7 @@ class _ProjectHomeState extends State<ProjectHome> {
     final report = await Navigator.of(context).push<Map<String, dynamic>>(
       MaterialPageRoute(builder: (_) => AutoTuneScreen(
         initialPlant: Plant(gain: m['K']!, tau: m['T']!, delay: m['L']!),
+        profile: DcsProfiles.forProject(project.vendor, project.controllerBlock),
         allowSave: true)));
     if (report == null || !mounted) return;
     try { await _update(project, project.withTuneReport(report)); }
@@ -235,6 +302,7 @@ class _ProjectHomeState extends State<ProjectHome> {
             children: [
               Wrap(spacing: 8, children: [
                 OutlinedButton(onPressed: () => _stepTest(p), child: const Text('Step Test')),
+                OutlinedButton(onPressed: () => _changeProfile(p), child: const Text('Профиль DCS')),
                 OutlinedButton(onPressed: _store == null ? null : () async {
                   await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) =>
                     ModelHistoryScreen(db: _store!, loopId: p.id, loopTag: p.tag)));
@@ -248,7 +316,8 @@ class _ProjectHomeState extends State<ProjectHome> {
                   _open(StabilityScreen(initialModel: p.identifiedModel)),
                   child: const Text('Stability')),
                 OutlinedButton(onPressed: p.identifiedModel == null ? null : () =>
-                  _open(SimulationScreen(initialModel: p.identifiedModel)),
+                  _open(SimulationScreen(initialModel: p.identifiedModel,
+                    profile: DcsProfiles.forProject(p.vendor, p.controllerBlock))),
                   child: const Text('Simulation')),
                 OutlinedButton(onPressed: () => _open(DualValveScreen(loopTag: p.tag)),
                   child: const Text('Dual-Valve LNG')),

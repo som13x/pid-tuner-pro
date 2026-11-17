@@ -17,6 +17,34 @@ class LoopProject {
     required this.controllerBlock, required this.createdAt,
     this.identifiedModel, this.history = const []});
 
+  /// Change DCS profile without reassigning any model or rewriting past
+  /// reports. Existing history remains append-only and retains its original
+  /// profile context. Changing vendor requires reviewing controller settings.
+  LoopProject withControllerProfile({
+    required String vendorName,
+    required String blockName,
+  }) {
+    if (vendorName.trim().isEmpty || blockName.trim().isEmpty) {
+      throw ArgumentError('Profile vendor and block are required');
+    }
+    if (vendor == vendorName && controllerBlock == blockName) return this;
+    final event = <String, Object?>{
+      'type': 'profileChanged',
+      'at': DateTime.now().toUtc().toIso8601String(),
+      'previousVendor': vendor,
+      'previousBlock': controllerBlock,
+      'vendor': vendorName,
+      'block': blockName,
+      'requiresEngineeringReview': true,
+    };
+    return LoopProject(
+      id: id, tag: tag, description: description,
+      vendor: vendorName, controllerBlock: blockName,
+      createdAt: createdAt, identifiedModel: identifiedModel,
+      history: [...history, event],
+    );
+  }
+
   LoopProject withIdentification({required Map<String, double> model,
     required String source, required double rSquared, required double nrmse}) {
     if (!model.values.every((v) => v.isFinite) || model['T'] == null ||
