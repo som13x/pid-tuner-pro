@@ -343,7 +343,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('PID · Td = td / 2').last);
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byKey(const Key('settings-save')));
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('settings-save')), 300,
+      scrollable: find.byType(Scrollable).last,
+    );
     await tester.tap(find.byKey(const Key('settings-save')));
     await tester.pumpAndSettle();
     expect(db.configuration!.tag, 'LIC-300');
