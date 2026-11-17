@@ -316,7 +316,8 @@ class _ProjectHomeState extends State<ProjectHome> {
                   _open(StabilityScreen(initialModel: p.identifiedModel)),
                   child: const Text('Stability')),
                 OutlinedButton(onPressed: p.identifiedModel == null ? null : () =>
-                  _open(SimulationScreen(initialModel: p.identifiedModel)),
+                  _open(SimulationScreen(initialModel: p.identifiedModel,
+                    profile: DcsProfiles.forProject(p.vendor, p.controllerBlock))),
                   child: const Text('Simulation')),
                 OutlinedButton(onPressed: () => _open(DualValveScreen(loopTag: p.tag)),
                   child: const Text('Dual-Valve LNG')),
