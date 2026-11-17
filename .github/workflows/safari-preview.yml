@@ -1,0 +1,115 @@
+name: Safari web preview
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/v3.1-safari-web-preview
+    paths:
+      - '.github/workflows/safari-preview.yml'
+      - 'flutter_example/**'
+      - 'lib/**'
+      - 'test/**'
+      - 'pubspec.yaml'
+  pull_request:
+    paths:
+      - '.github/workflows/safari-preview.yml'
+      - 'flutter_example/**'
+      - 'lib/**'
+      - 'test/**'
+      - 'pubspec.yaml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: safari-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Ensure standard Flutter web platform
+        working-directory: flutter_example
+        run: |
+          flutter create --platforms=web --project-name pid_tuner_pro_demo --no-pub .
+          test -f web/index.html
+
+      - name: Preserve generated web platform in preview branch
+        if: github.event_name == 'push' && github.ref == 'refs/heads/feature/v3.1-safari-web-preview'
+        run: |
+          git add -- flutter_example/web
+          if ! git diff --cached --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "chore(web): check in Flutter web platform"
+            git push origin "HEAD:$GITHUB_REF_NAME"
+          fi
+
+      - name: Core Dart tests and analyzer
+        run: |
+          dart pub get
+          dart test
+          dart analyze lib test
+
+      - name: Flutter tests and analyzer
+        working-directory: flutter_example
+        run: |
+          flutter pub get
+          flutter test
+          flutter analyze --no-fatal-infos
+
+      - name: Safari Flutter Web release build
+        working-directory: flutter_example
+        run: |
+          flutter build web --release \
+            --target lib/web_main.dart \
+            --base-href /pid-tuner-pro/
+          test -f build/web/index.html
+          test -f build/web/main.dart.js
+          test -f build/web/flutter_bootstrap.js
+
+      - name: Upload standalone Safari website
+        uses: actions/upload-artifact@v4
+        with:
+          name: pid-tuner-pro-safari-web-preview
+          path: flutter_example/build/web/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Deploy browser preview to gh-pages branch
+        if: github.event_name == 'push' && github.ref == 'refs/heads/feature/v3.1-safari-web-preview'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./flutter_example/build/web
+          publish_branch: gh-pages
+          force_orphan: true
+          enable_jekyll: false
+          commit_message: "deploy: Safari Flutter preview from ${{ github.sha }}"
+
+      - name: Report website publishing instructions
+        run: |
+          {
+            echo "## Safari Preview"
+            echo "- Flutter web build: successful"
+            echo "- Artifacts: pid-tuner-pro-safari-web-preview"
+            if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+              echo "- Site target: https://som13x.github.io/pid-tuner-pro/"
+              echo "- GitHub Pages must be enabled with Deploy from branch: gh-pages / root."
+            else
+              echo "- Deployment skipped in PR, it runs on preview-branch pushes."
+            fi
+            echo "- Preview is session-only: web has no SQLite project storage/backup yet."
+          } >> "$GITHUB_STEP_SUMMARY"
