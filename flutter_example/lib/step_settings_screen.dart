@@ -21,11 +21,13 @@ class StepSettingsScreen extends StatefulWidget {
 class _StepSettingsScreenState extends State<StepSettingsScreen> {
   late final TextEditingController tag;
   late final TextEditingController comments;
+  late final TextEditingController lambda;
   late String profileId;
   late ControlledVariable variable;
   late TuningMethod tuningMethod;
   late StepAcquisition acquisition;
   late bool selfRegulatingLevelConfirmed;
+  late bool integratingProcessConfirmed;
   bool saving = false;
   String? error;
 
@@ -35,6 +37,8 @@ class _StepSettingsScreenState extends State<StepSettingsScreen> {
     final initial = widget.initialSettings;
     tag = TextEditingController(text: initial?.tag ?? '');
     comments = TextEditingController(text: initial?.comments ?? '');
+    lambda = TextEditingController(
+      text: initial?.lambdaSeconds?.toString() ?? '');
     profileId = initial?.profileId ?? DcsProfiles.yokogawaCentumVp.id;
     variable = initial?.controlledVariable ?? ControlledVariable.flow;
     tuningMethod = initial?.tuningMethod ??
@@ -42,18 +46,23 @@ class _StepSettingsScreenState extends State<StepSettingsScreen> {
     acquisition = initial?.acquisition ?? StepAcquisition.manualDelayAndT63;
     selfRegulatingLevelConfirmed =
       initial?.selfRegulatingLevelConfirmed ?? false;
+    integratingProcessConfirmed =
+      initial?.integratingProcessConfirmed ?? false;
   }
 
   @override
   void dispose() {
     tag.dispose();
     comments.dispose();
+    lambda.dispose();
     super.dispose();
   }
 
   Future<void> save() async {
     setState(() { saving = true; error = null; });
     try {
+      final lambdaText = lambda.text.trim().replaceAll(',', '.');
+      final desiredLambda = lambdaText.isEmpty ? null : double.parse(lambdaText);
       final selected = StepTestSettings(
         tag: tag.text,
         comments: comments.text,
@@ -62,6 +71,8 @@ class _StepSettingsScreenState extends State<StepSettingsScreen> {
         tuningMethod: tuningMethod,
         acquisition: acquisition,
         selfRegulatingLevelConfirmed: selfRegulatingLevelConfirmed,
+        integratingProcessConfirmed: integratingProcessConfirmed,
+        lambdaSeconds: desiredLambda,
       );
       selected.validate();
       await widget.onSave(selected);
@@ -144,6 +155,10 @@ class _StepSettingsScreenState extends State<StepSettingsScreen> {
             setState(() {
               variable = next;
               tuningMethod = StepTestSettings.recommendedFor(next);
+              acquisition = tuningMethod == TuningMethod.integratingProcessSimc
+                ? StepAcquisition.manualIntegratingSlope
+                : StepAcquisition.manualDelayAndT63;
+              integratingProcessConfirmed = false;
               if (next != ControlledVariable.level) {
                 selfRegulatingLevelConfirmed = false;
               }
@@ -156,7 +171,8 @@ class _StepSettingsScreenState extends State<StepSettingsScreen> {
         const SizedBox(height: 6),
         Text(recommended.title),
         Text(recommended.explanation),
-        if (variable == ControlledVariable.level) ...[
+        if (variable == ControlledVariable.level &&
+            tuningMethod != TuningMethod.integratingProcessSimc) ...[
           const SizedBox(height: 8),
           CheckboxListTile(
             key: const Key('settings-level-confirm'),
@@ -181,11 +197,46 @@ class _StepSettingsScreenState extends State<StepSettingsScreen> {
             child: Text(m.title, overflow: TextOverflow.ellipsis),
           )).toList(),
           onChanged: (next) {
-            if (next != null) setState(() => tuningMethod = next);
+            if (next != null) setState(() {
+              final wasIntegrating = tuningMethod == TuningMethod.integratingProcessSimc;
+              tuningMethod = next;
+              final isIntegrating = next == TuningMethod.integratingProcessSimc;
+              if (isIntegrating != wasIntegrating) {
+                acquisition = isIntegrating
+                  ? StepAcquisition.manualIntegratingSlope
+                  : StepAcquisition.manualDelayAndT63;
+              }
+            });
           },
         ),
         const SizedBox(height: 6),
         Text(tuningMethod.explanation),
+        if (tuningMethod == TuningMethod.integratingProcessSimc) ...[
+          const SizedBox(height: 10),
+          CheckboxListTile(
+            key: const Key('settings-integrating-confirm'),
+            title: const Text('По форме переходной характеристики '
+              'подтверждён интегрирующий процесс (PV не выходит '
+              'на новое установившееся значение)'),
+            subtitle: const Text('Без подтверждения приложение '
+              'сохранит измерения, но не выдаст PI-параметры.'),
+            value: integratingProcessConfirmed,
+            onChanged: (v) => setState(() =>
+              integratingProcessConfirmed = v ?? false),
+          ),
+          const SizedBox(height: 6),
+          TextField(
+            key: const Key('settings-lambda'),
+            controller: lambda,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: inputDecoration('Желаемая λ, секунды (необязательно)'),
+          ),
+          const SizedBox(height: 5),
+          const Text('Если λ пустая: автоматически λ = 3×L. '
+            'При L = 0 нужно ввести λ > 0 вручную. '
+            'Чем больше λ, тем спокойнее регулирование; '
+            'настройки требуют проверки устойчивости и пределов PV.'),
+        ],
         const SizedBox(height: 10),
         const Text('Формулы рассчитывают эквивалент PI (D = 0) в '
           'нормированных процентах MV/PV. Выбор производителя '
@@ -194,11 +245,17 @@ class _StepSettingsScreenState extends State<StepSettingsScreen> {
           'и шкалы надо проверить по документации DCS.'),
         const SizedBox(height: 16),
         DropdownButtonFormField<StepAcquisition>(
-          key: const Key('settings-step-method'),
+          key: ValueKey('settings-step-method-' +
+            tuningMethod.name + '-' + acquisition.name),
           initialValue: acquisition,
           isExpanded: true,
           decoration: inputDecoration('7. Как проводить Step Test'),
-          items: StepAcquisition.values.map((m) => DropdownMenuItem(
+          items: StepAcquisition.values.where((m) =>
+            tuningMethod == TuningMethod.engineeringReview ||
+            (tuningMethod == TuningMethod.integratingProcessSimc) ==
+            (m == StepAcquisition.manualIntegratingSlope ||
+              m == StepAcquisition.csvIntegratingTrend)
+          ).map((m) => DropdownMenuItem(
             value: m, child: Text(m.title,
               overflow: TextOverflow.ellipsis),
           )).toList(),

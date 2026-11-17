@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'auto_tune.dart';
+import 'integrating_step_identification.dart';
 import 'dcs_controller_profiles.dart';
 
 /// Step-test context is immutable and portable across browsers and DBs.
@@ -11,6 +12,7 @@ enum TuningMethod {
   imcConservative,
   zieglerNicholsOpenLoop,
   cohenCoonOpenLoop,
+  integratingProcessSimc,
   engineeringReview,
 }
 
@@ -18,6 +20,8 @@ enum StepAcquisition {
   manualDelayAndT63,
   manualTwoPoints,
   csvTrend,
+  manualIntegratingSlope,
+  csvIntegratingTrend,
 }
 
 extension ControlledVariableText on ControlledVariable {
@@ -37,6 +41,8 @@ extension TuningMethodText on TuningMethod {
       'Ziegler–Nichols (разомкнутый контур, PI)',
     TuningMethod.cohenCoonOpenLoop =>
       'Cohen–Coon (разомкнутый контур, PI)',
+    TuningMethod.integratingProcessSimc =>
+      'Tuning Rules for an Integrating Process (SIMC PI)',
     TuningMethod.engineeringReview =>
       'Без автоматической настройки / инженерная проверка',
   };
@@ -53,6 +59,12 @@ extension TuningMethodText on TuningMethod {
       'PI: Kc = T / (|K| × L) × (0,9 + L/(12T)); '
       'Ti = L × (30 + 3L/T)/(9 + 20L/T). '
       'Требуется L > 0; контролируйте устойчивость.',
+    TuningMethod.integratingProcessSimc =>
+      'Для IPDT-модели G(s)=Ki·exp(-Ls)/s. '
+      'SIMC PI: Kc=1/(|Ki|·(λ+L)), Ti=4(λ+L), Td=0. '
+      'Ki в (%PV/с)/(%MV), λ и L в секундах. '
+      'Обычные FOPDT K/T/L и время t63 здесь не применяются. '
+      'Это теоретический расчёт, не готовые параметры блока DCS.',
     TuningMethod.engineeringReview =>
       'PID/PI автоматически не рассчитывается. Требуется адекватная '
       'модель процесса и проверка специалистом.',
@@ -67,6 +79,10 @@ extension StepAcquisitionText on StepAcquisition {
       'Ручной: 28,35% и 63,21% PV',
     StepAcquisition.csvTrend =>
       'CSV: запись тренда PV/MV во времени',
+    StepAcquisition.manualIntegratingSlope =>
+      'Интегрирующий: ручной замер наклона PV',
+    StepAcquisition.csvIntegratingTrend =>
+      'Интегрирующий: CSV ступени MV и наклона PV',
   };
 
   String get instructions => switch (this) {
@@ -90,6 +106,30 @@ extension StepAcquisitionText on StepAcquisition {
       '4. Введите времена t28 и t63 в секундах и шкалы MV/PV. '
       'T = 1,5(t63-t28); L = t63-T. '
       'Если результат не причинно-следственный, не применяйте модель.',
+    StepAcquisition.manualIntegratingSlope =>
+      '1. По утверждённой процедуре убедитесь, что изменение уровня '
+      'или другой PV можно безопасно остановить; проверьте аварийные '
+      'пределы, запасы ёмкости и безопасный выход из испытания.\n'
+      '2. До одной небольшой ступени MV зафиксируйте исходный '
+      'наклон PV (единицы PV в секунду), MV0 и MV1.\n'
+      '3. Измерьте запаздывание L. На участке устойчивого '
+      'линейного изменения PV ПОСЛЕ L запишите PV(t1), PV(t2) '
+      'и t1/t2 от момента ступени. Не ждите новой установившейся PV: '
+      'у интегрирующего объекта её может не быть.\n'
+      '4. Ki=[(PV2-PV1)/(t2-t1)-наклон до ступени]/ΔMV; '
+      'приложение нормирует шкалы MV/PV. Верните процесс '
+      'в безопасное состояние по согласованной процедуре.',
+    StepAcquisition.csvIntegratingTrend =>
+      '1. Проверьте ограничения PV/MV и возможность безопасно '
+      'прекратить испытание. Запишите равномерный тренд до и '
+      'после одиночной ступени MV в ручном режиме.\n'
+      '2. Сохраните CSV time,mv,pv с моментом изменения MV; '
+      'записывайте как исходный наклон PV, так и линейный '
+      'участок после запаздывания.\n'
+      '3. Программа оценит изменение наклона PV и запаздывание L. '
+      'Проверьте совпадение модели и фактического тренда.\n'
+      '4. Не допускайте достижения пределов уровня/давления; '
+      'не переносите расчётные PI в DCS без проверки.',
     StepAcquisition.csvTrend =>
       '1. Согласуйте безопасное испытание. Запишите равномерный '
       'тренд MV и PV, включая устойчивый участок ДО ступени '
@@ -111,6 +151,8 @@ class StepTestSettings {
   final TuningMethod tuningMethod;
   final StepAcquisition acquisition;
   final bool selfRegulatingLevelConfirmed;
+  final bool integratingProcessConfirmed;
+  final double? lambdaSeconds;
 
   const StepTestSettings({
     required this.tag,
@@ -120,26 +162,47 @@ class StepTestSettings {
     required this.tuningMethod,
     required this.acquisition,
     this.selfRegulatingLevelConfirmed = false,
+    this.integratingProcessConfirmed = false,
+    this.lambdaSeconds,
   });
 
   DcsControllerProfile get profile => DcsProfiles.byId(profileId);
 
   static TuningMethod recommendedFor(ControlledVariable variable) =>
       variable == ControlledVariable.level
-          ? TuningMethod.engineeringReview
+          ? TuningMethod.integratingProcessSimc
           : TuningMethod.imcConservative;
 
   TuningMethod get recommendedMethod =>
       recommendedFor(controlledVariable);
 
+  bool get isIntegratingMethod =>
+      tuningMethod == TuningMethod.integratingProcessSimc;
+
+  bool get isIntegratingAcquisition =>
+      acquisition == StepAcquisition.manualIntegratingSlope ||
+      acquisition == StepAcquisition.csvIntegratingTrend;
+
   bool get canCalculate =>
       tuningMethod != TuningMethod.engineeringReview &&
-      (controlledVariable != ControlledVariable.level ||
-       selfRegulatingLevelConfirmed);
+      (isIntegratingMethod
+        ? integratingProcessConfirmed
+        : !isIntegratingAcquisition &&
+          (controlledVariable != ControlledVariable.level ||
+            selfRegulatingLevelConfirmed));
 
   String? get tuningBlockReason {
     if (tuningMethod == TuningMethod.engineeringReview) {
       return 'Выбран метод без автоматического PI-расчёта.';
+    }
+    if (isIntegratingMethod) {
+      if (!integratingProcessConfirmed) {
+        return 'Подтвердите по реакции PV, что объект интегрирующий.';
+      }
+       return null;
+    }
+    if (isIntegratingAcquisition) {
+      return 'Для интегрирующего Step Test выберите SIMC-правила.';
     }
     if (controlledVariable == ControlledVariable.level &&
         !selfRegulatingLevelConfirmed) {
@@ -157,6 +220,16 @@ class StepTestSettings {
           'комментарий не должен превышать 2000 символов.');
     }
     profile;
+    if (lambdaSeconds != null &&
+        (!lambdaSeconds!.isFinite || lambdaSeconds! <= 0 ||
+        lambdaSeconds! > 8640000)) {
+      throw ArgumentError('Lambda must be in (0, 8640000] seconds');
+    }
+    if (isIntegratingMethod != isIntegratingAcquisition &&
+        tuningMethod != TuningMethod.engineeringReview) {
+      throw ArgumentError('Выбранный метод настройки не соответствует '
+        'типу Step Test: FOPDT или интегрирующий (IPDT).');
+    }
   }
 
   Map<String, Object?> toJson() => {
@@ -168,6 +241,8 @@ class StepTestSettings {
     'tuningMethod': tuningMethod.name,
     'acquisition': acquisition.name,
     'selfRegulatingLevelConfirmed': selfRegulatingLevelConfirmed,
+    'integratingProcessConfirmed': integratingProcessConfirmed,
+    'lambdaSeconds': lambdaSeconds,
   };
 
   factory StepTestSettings.fromJson(Map<String, dynamic> raw) {
@@ -193,6 +268,10 @@ class StepTestSettings {
         raw['acquisition'], 'acquisition'),
       selfRegulatingLevelConfirmed:
         raw['selfRegulatingLevelConfirmed'] == true,
+      integratingProcessConfirmed:
+        raw['integratingProcessConfirmed'] == true,
+      lambdaSeconds: raw['lambdaSeconds'] == null ? null
+        : (raw['lambdaSeconds'] as num).toDouble(),
     );
     s.validate();
     return s;
@@ -239,6 +318,10 @@ class StepPiCalculator {
 
   StepPiEstimate calculate(Plant plant, StepTestSettings settings) {
     settings.validate();
+    if (settings.isIntegratingMethod) {
+      throw StateError('An IPDT model is required; '
+        'use calculateIntegrating, not FOPDT');
+    }
     plant.validate();
     if (!settings.canCalculate) {
       throw StateError(settings.tuningBlockReason ?? 'PI unavailable');
@@ -272,6 +355,8 @@ class StepPiCalculator {
         final r = l / t;
         kc = (t / (k * l)) * (0.9 + r / 12);
         ti = l * (30 + 3 * r) / (9 + 20 * r);
+      case TuningMethod.integratingProcessSimc:
+        throw StateError('Use an integrating process model (IPDT)');
       case TuningMethod.engineeringReview:
         throw StateError('Automatic tuning disabled');
     }
@@ -293,4 +378,44 @@ class StepPiCalculator {
       method: settings.tuningMethod,
     );
   }
+
+  /// Skogestad original SIMC PI rules for G(s)=Ki*exp(-L*s)/s.
+  /// Reference: https://skoge.folk.ntnu.no/publications/2012/skogestad-improved-simc-pid/PIDbook-chapter5.pdf
+  StepPiEstimate calculateIntegrating(
+      IntegratingPlant plant, StepTestSettings settings) {
+    settings.validate();
+    plant.validate();
+    if (!settings.isIntegratingMethod) {
+      throw StateError('Only SIMC integrating rules accept an IPDT model');
+    }
+    if (!settings.canCalculate) {
+      throw StateError(settings.tuningBlockReason ?? 'IPDT tuning blocked');
+    }
+    // If λ is not explicitly entered, use a conservative 3×L
+    // initial setting (ISA InTech integrating loop tuning guidance).
+    // Zero effective delay requires an explicitly selected λ.
+    final lambda = settings.lambdaSeconds ?? (3 * plant.delaySeconds);
+    final sum = lambda + plant.delaySeconds;
+    if (!lambda.isFinite || lambda <= 0 ||
+        !sum.isFinite || sum <= 0) {
+      throw StateError('Invalid lambda/dead-time units');
+    }
+    final kc = 1 / (plant.gainPerSecond.abs() * sum);
+    final ti = 4 * sum;
+    final pb = 100 / kc;
+    if (![kc, ti, pb].every((n) => n.isFinite && n > 0)) {
+      throw StateError('IPDT PI parameters out of range');
+    }
+    return StepPiEstimate(
+      kcNormalized: kc, pbPercent: pb,
+      tiSeconds: ti, tdSeconds: 0,
+      lambdaSeconds: lambda,
+      display: settings.profile.translate(
+        pbPercent: pb, tiSeconds: ti,
+        processGain: plant.gainPerSecond,
+      ),
+      method: settings.tuningMethod,
+    );
+  }
+
 }

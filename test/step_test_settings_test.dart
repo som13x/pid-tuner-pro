@@ -62,7 +62,7 @@ void main() {
         TuningMethod.imcConservative);
     }
     expect(StepTestSettings.recommendedFor(ControlledVariable.level),
-      TuningMethod.engineeringReview);
+      TuningMethod.integratingProcessSimc);
     expect(settings(variable: ControlledVariable.level).canCalculate, false);
     expect(settings(
       variable: ControlledVariable.level,

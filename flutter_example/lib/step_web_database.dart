@@ -1,5 +1,6 @@
 import 'package:idb_shim/idb_shim.dart';
 import 'package:pid_tuner_pro_core/auto_tune.dart';
+import 'package:pid_tuner_pro_core/integrating_step_identification.dart';
 import 'package:pid_tuner_pro_core/step_test_settings.dart';
 
 import 'step_web_factory.dart';
@@ -73,6 +74,9 @@ class StepWebDatabase {
     String? originalCsv,
   }) async {
     settings.validate();
+    if (settings.isIntegratingAcquisition) {
+      throw ArgumentError('FOPDT result cannot be stored as an IPDT test');
+    }
     plant.validate();
     if (source.trim().isEmpty) throw ArgumentError('Missing source');
     if (originalCsv != null && originalCsv.length > 10 * 1024 * 1024) {
@@ -86,6 +90,47 @@ class StepWebDatabase {
       'source': source,
       'model': {
         'K': plant.gain, 'T': plant.tau, 'L': plant.delay,
+      },
+      'evidence': evidence,
+      if (piEstimate != null) 'piEstimate': piEstimate.toJson(),
+      if (originalCsv != null) 'csvText': originalCsv,
+      'requiresEngineeringReview': true,
+      'verifiedForDcsDeployment': false,
+    };
+    final tx = _db.transaction(_resultsStore, idbModeReadWrite);
+    await tx.objectStore(_resultsStore).add(record);
+    await tx.completed;
+  }
+
+  /// Separate IPDT result schema. Never serialize Ki as FOPDT steady-state K.
+  /// Existing records and object stores remain unchanged.
+  Future<void> addIntegratingResult({
+    required StepTestSettings settings,
+    required IntegratingPlant plant,
+    required String source,
+    required Map<String, Object?> evidence,
+    StepPiEstimate? piEstimate,
+    String? originalCsv,
+  }) async {
+    settings.validate();
+    plant.validate();
+    if (!settings.isIntegratingAcquisition) {
+      throw ArgumentError('IPDT results require integrating Step Test');
+    }
+    if (source.trim().isEmpty) throw ArgumentError('Missing source');
+    if (originalCsv != null && originalCsv.length > 10 * 1024 * 1024) {
+      throw ArgumentError('CSV exceeds 10 MB');
+    }
+    await open();
+    final record = <String, Object?>{
+      'schemaVersion': 1,
+      'savedAt': DateTime.now().toUtc().toIso8601String(),
+      'settings': settings.toJson(),
+      'source': source,
+      'model': {
+        'type': 'IPDT',
+        'KiPerSecond': plant.gainPerSecond,
+        'L': plant.delaySeconds,
       },
       'evidence': evidence,
       if (piEstimate != null) 'piEstimate': piEstimate.toJson(),
