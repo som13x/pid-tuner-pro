@@ -29,6 +29,10 @@ void main() {
     await tester.tap(find.text('CSV / тренд'));
     await tester.pumpAndSettle();
     expect(find.text('Выбрать CSV-файл'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Идентифицировать по CSV'), 250,
+      scrollable: find.byType(Scrollable).last,
+    );
     expect(find.text('Идентифицировать по CSV'), findsOneWidget);
     expect(find.text('Ручная оценка FOPDT по ступени MV'), findsNothing);
   });
