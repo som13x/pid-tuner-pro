@@ -6,6 +6,7 @@ on:
     branches:
       - feature/v3.1-safari-web-preview
       - feature/v3.2-step-test-settings-indexeddb
+      - feature/v3.3-integrating-process-simc
     paths:
       - '.github/workflows/safari-preview.yml'
       - 'flutter_example/**'
@@ -90,7 +91,7 @@ jobs:
           retention-days: 90
 
       - name: Deploy browser preview to gh-pages branch
-        if: github.event_name == 'push' && github.ref == 'refs/heads/feature/v3.2-step-test-settings-indexeddb'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/feature/v3.3-integrating-process-simc'
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
