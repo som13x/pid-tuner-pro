@@ -13,9 +13,9 @@ void main() {
     createdAt: DateTime.utc(2026, 1, 1));
 
   test('multiple identifications can be selected independently', () async {
-    var p = loop('FIC-1').withIdentification(model: {'K': 0.8, 'T': 12, 'L': 3}, source: 'first');
+    var p = loop('FIC-1').withIdentification(model: {'K': 0.8, 'T': 12, 'L': 3}, source: 'first', rSquared: 1.0, nrmse: 0.0);
     await db.save([p]);
-    p = p.withIdentification(model: {'K': 1.2, 'T': 18, 'L': 5}, source: 'second');
+    p = p.withIdentification(model: {'K': 1.2, 'T': 18, 'L': 5}, source: 'second', rSquared: 1.0, nrmse: 0.0);
     await db.save([p]);
     final history = await db.modelsFor('FIC-1');
     expect(history, hasLength(2));
@@ -25,13 +25,13 @@ void main() {
   });
 
   test('cannot activate model from a different loop', () async {
-    await db.save([loop('A').withIdentification(model: {'K': 1, 'T': 10, 'L': 2}, source: 'a'), loop('B')]);
+    await db.save([loop('A').withIdentification(model: {'K': 1, 'T': 10, 'L': 2}, source: 'a', rSquared: 1.0, nrmse: 0.0), loop('B')]);
     final id = (await db.modelsFor('A')).single.id;
     await expectLater(db.selectActiveModel('B', id), throwsStateError);
   });
 
   test('operating point is stored with the identification', () async {
-    await db.save([loop('A').withIdentification(model: {'K': 1, 'T': 10, 'L': 2}, source: 'a')]);
+    await db.save([loop('A').withIdentification(model: {'K': 1, 'T': 10, 'L': 2}, source: 'a', rSquared: 1.0, nrmse: 0.0)]);
     final id = (await db.modelsFor('A')).single.id;
     await db.updateOperatingPoint('A', id, 'Flow 1200; MV 50%');
     expect((await db.modelsFor('A')).single.operatingPoint, 'Flow 1200; MV 50%');
