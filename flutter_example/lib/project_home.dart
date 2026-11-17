@@ -7,7 +7,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:pid_tuner_pro_core/auto_tune.dart';
 import 'package:pid_tuner_pro_core/dcs_controller_profiles.dart';
 import 'main.dart' show AutoTuneScreen, StepTestScreen;
-import 'package:pid_tuner_pro_core/step_identification.dart';
 import 'stability_screen.dart' show StabilityScreen;
 import 'project_store.dart';
 import 'sqlite_project_store.dart';
@@ -17,6 +16,7 @@ import 'simulation_screen.dart';
 import 'dual_valve_screen.dart';
 import 'rl_tracking_screen.dart';
 import 'circuit_studio_screen.dart';
+import 'step_test_selection.dart';
 
 class ProjectHome extends StatefulWidget {
   const ProjectHome({super.key});
@@ -231,27 +231,67 @@ class _ProjectHomeState extends State<ProjectHome> {
   }
 
   Future<void> _stepTest(LoopProject project) async {
-    final fit = await Navigator.of(context).push<IdentificationResult>(
+    final selected = await Navigator.of(context).push<StepTestSelection>(
       MaterialPageRoute(builder: (_) => const StepTestScreen()));
-    if (fit == null || !mounted) return;
-    if (!fit.suitableForAutoTune) {
+    if (selected == null || !mounted) return;
+    if (!selected.isManual && !selected.csvFit!.suitableForAutoTune) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Качество идентификации недостаточно для Auto Tune')));
+        content: Text('Качество CSV идентификации недостаточно для Auto Tune')));
       return;
     }
     try {
-      await _update(project, project.withIdentification(
-        model: {'K': fit.plant.gain, 'T': fit.plant.tau, 'L': fit.plant.delay},
-        source: 'Step Test CSV', rSquared: fit.rSquared,
-        nrmse: fit.normalizedRmse));
+      // Do not accidentally overwrite a more recently updated history
+      // snapshot after a Step Test route returns.
+      final current = _projects.firstWhere((p) => p.id == project.id);
+      await _update(current, current.withIdentification(
+        model: {'K': selected.plant.gain,
+          'T': selected.plant.tau, 'L': selected.plant.delay},
+        source: selected.source, rSquared: selected.rSquared,
+        nrmse: selected.nrmse, manualEvidence: selected.manualEvidence));
+      if (selected.isManual && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Ручная модель сохранена как оценочная; R²/NRMSE не определены')));
+      }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Ошибка сохранения модели: $e')));
     }
   }
 
   Future<void> _autoTune(LoopProject project) async {
     final m = project.identifiedModel;
     if (m == null) return;
+    final modelEvents = project.history.where((e) =>
+      e['type'] == 'identification').toList().reversed;
+    final relevant = modelEvents.where((e) {
+      final entry = e['model'];
+      if (entry is! Map) return false;
+      return entry['K'] == m['K'] &&
+        entry['T'] == m['T'] && entry['L'] == m['L'];
+    });
+    final currentSource = relevant.isEmpty
+      ? null : relevant.first;
+    if (currentSource != null &&
+        currentSource['manualEvidence'] is Map) {
+      final approved = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Ручная модель: нужна проверка'),
+          content: const Text('Эта модель K/T/L получена по введённым '
+            'вручную характеристикам, без проверки R² и NRMSE по тренду. '
+            'Auto Tune выполнит только офлайн-моделирование. '
+            'Настройки нельзя переносить в действующую DCS без '
+            'идентификации, анализа устойчивости и согласованных испытаний.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Отмена')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Продолжить расчёт')),
+          ],
+        ),
+      );
+      if (approved != true || !mounted) return;
+    }
     final report = await Navigator.of(context).push<Map<String, dynamic>>(
       MaterialPageRoute(builder: (_) => AutoTuneScreen(
         initialPlant: Plant(gain: m['K']!, tau: m['T']!, delay: m['L']!),

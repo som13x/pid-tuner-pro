@@ -9,6 +9,8 @@ import 'package:pid_tuner_pro_core/auto_tune.dart';
 import 'package:pid_tuner_pro_core/dcs_controller_profiles.dart';
 import 'package:pid_tuner_pro_core/step_identification.dart';
 import 'package:pid_tuner_pro_core/trend_csv.dart';
+import 'manual_step_form.dart';
+import 'step_test_selection.dart';
 
 void main() => runApp(const PidTunerDemo());
 
@@ -309,6 +311,7 @@ class _StepTestScreenState extends State<StepTestScreen> {
   List<TrendPoint>? measured, fitted;
   IdentificationResult? result;
   String? error;
+  bool manualMode = false;
 
   @override
   void dispose() {csv.dispose();mvHigh.dispose();pvHigh.dispose();manualStep.dispose();super.dispose();}
@@ -349,6 +352,24 @@ class _StepTestScreenState extends State<StepTestScreen> {
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Step Test · FOPDT')),
     body: ListView(padding: const EdgeInsets.all(16),children: [
+      const Text('Источник Step Test',
+        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+      const SizedBox(height: 8),
+      Wrap(spacing: 8, children: [
+        ChoiceChip(
+          label: const Text('CSV / тренд'),
+          selected: !manualMode,
+          onSelected: (_) => setState(() => manualMode = false)),
+        ChoiceChip(
+          label: const Text('Ручной ввод'),
+          selected: manualMode,
+          onSelected: (_) => setState(() => manualMode = true)),
+      ]),
+      const SizedBox(height: 12),
+      if (manualMode) ManualStepForm(
+        onAccept: (estimate) => Navigator.of(context).pop(
+          StepTestSelection.fromManual(estimate))),
+      if (!manualMode) ...[
       const Text('Вставьте CSV с колонками time,mv,pv. Время в секундах; MV и PV в инженерных единицах. Данные не отправляются в сеть.'),
       const SizedBox(height: 12),
       OutlinedButton.icon(onPressed: importCsv, icon: const Icon(Icons.file_open), label: const Text('Выбрать CSV-файл')),
@@ -382,13 +403,15 @@ class _StepTestScreenState extends State<StepTestScreen> {
           ? 'Формальные критерии качества выполнены. Требуется инженерная проверка.'
           : 'Качество недостаточно для Auto Tune.'),
         if (result!.suitableForAutoTune) FilledButton.icon(
-          onPressed: () => Navigator.of(context).pop(result),
+          onPressed: () => Navigator.of(context).pop(
+            StepTestSelection.fromCsv(result!)),
           icon: const Icon(Icons.arrow_forward),
           label: const Text('Передать модель в Auto Tune')),
         const SizedBox(height: 12),
         const Text('Измеренная PV и расчётная FOPDT · % шкалы'),
         SizedBox(height: 230,child: CustomPaint(
           painter: _StepPlotPainter(measured!,fitted!),child: const SizedBox.expand())),
+      ],
       ],
     ]),
   );
