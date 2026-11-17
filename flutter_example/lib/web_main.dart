@@ -184,7 +184,7 @@ class WebStepTest extends StatefulWidget {
   final StepWebDatabase database;
   final List<Map<String, dynamic>> results;
   final Future<void> Function() onResultSaved;
-  final VoidCallback onNewStepTest;
+  final VoidCallback? onNewStepTest;
 
   const WebStepTest({
     super.key,
@@ -192,7 +192,7 @@ class WebStepTest extends StatefulWidget {
     required this.database,
     required this.results,
     required this.onResultSaved,
-    required this.onNewStepTest,
+    this.onNewStepTest,
   });
 
   @override
