@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:pid_tuner_pro_core/integrating_step_identification.dart';
 
-/// Original OptiControls four-point measurement: two pre-step points
-/// (PV1/t1, PV2/t2) and two post-delay points (PV3/t3, PV4/t4).
+/// OptiControls: PV1 and PV2 separated by T1 minutes;
+/// PV3 and PV4 separated by T2 minutes. No absolute timestamps.
 class IntegratingManualForm extends StatefulWidget {
   final ValueChanged<IntegratingManualEstimate> onAccept;
   const IntegratingManualForm({super.key, required this.onAccept});
@@ -23,8 +23,7 @@ class _IntegratingManualFormState extends State<IntegratingManualForm> {
     const defaults = <String, String>{
       'mvBefore': '', 'mvAfter': '',
       'pv1': '', 'pv2': '', 'pv3': '', 'pv4': '',
-      't1': '', 't2': '', 't3': '', 't4': '',
-      'delay': '',
+      'T1': '', 'T2': '', 'delay': '',
       'mvLow': '0', 'mvHigh': '100',
       'pvLow': '0', 'pvHigh': '100',
     };
@@ -57,11 +56,9 @@ class _IntegratingManualFormState extends State<IntegratingManualForm> {
         pv2: getNumber('pv2'),
         pv3: getNumber('pv3'),
         pv4: getNumber('pv4'),
-        t1Seconds: getNumber('t1'),
-        t2Seconds: getNumber('t2'),
-        t3Seconds: getNumber('t3'),
-        t4Seconds: getNumber('t4'),
-        delaySeconds: getNumber('delay'),
+        t1Minutes: getNumber('T1'),
+        t2Minutes: getNumber('T2'),
+        delayMinutes: getNumber('delay'),
         mvSpanLow: getNumber('mvLow'),
         mvSpanHigh: getNumber('mvHigh'),
         pvSpanLow: getNumber('pvLow'),
@@ -112,13 +109,14 @@ class _IntegratingManualFormState extends State<IntegratingManualForm> {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Text('OptiControls · ручной Step Test (4 точки)',
+      Text('OptiControls · Step Test (T1/T2 в минутах)',
         style: Theme.of(context).textTheme.titleMedium),
       const SizedBox(height: 8),
-      const Text('Момент ступени MV принимается за t = 0 с. '
-        'Для точек ДО ступени укажите отрицательные t1 и t2; '
-        'для точек ПОСЛЕ запаздывания положительные t3 и t4. '
-        'Все значения времени вводятся в секундах.'),
+      const Text('Вводите именно продолжительность двух интервалов '
+        'в минутах, не абсолютное время точек: '
+        'T1 между PV1 и PV2 на первом наклоне, '
+        'T2 между PV3 и PV4 на втором наклоне. '
+        'Запаздывание td также в минутах.'),
       section('Ступень выхода регулятора · MV',
         'Зафиксируйте MV0 и MV1 после согласованной ступени.'),
       Wrap(spacing: 10, runSpacing: 14, children: [
@@ -126,28 +124,27 @@ class _IntegratingManualFormState extends State<IntegratingManualForm> {
         input('mvAfter', 'MV1 после ступени'),
       ]),
       section('Slope 1 · до ступени MV',
-        'Выберите две достаточно разнесённые точки на исходном '
-        'линейном участке: t1 < t2 ≤ 0.'),
+        'Измерьте PV1 и PV2 на исходном наклоне. '
+        'T1 — прошедшее между ними время в минутах.'),
       Wrap(spacing: 10, runSpacing: 14, children: [
-        input('pv1', 'PV1 при t1'),
-        input('t1', 't1, с'),
-        input('pv2', 'PV2 при t2'),
-        input('t2', 't2, с'),
+        input('pv1', 'PV1'),
+        input('pv2', 'PV2'),
+        input('T1', 'T1, мин'),
       ]),
       section('Slope 2 · после запаздывания',
-        'Две точки на новом установившемся НАКЛОНЕ, '
-        'не на установившемся значении PV: L < t3 < t4.'),
+        'Измерьте PV3 и PV4 на новом наклоне после запаздывания. '
+        'T2 — прошедшее между ними время в минутах.'),
       Wrap(spacing: 10, runSpacing: 14, children: [
-        input('pv3', 'PV3 при t3'),
-        input('t3', 't3, с'),
-        input('pv4', 'PV4 при t4'),
-        input('t4', 't4, с'),
+        input('pv3', 'PV3'),
+        input('pv4', 'PV4'),
+        input('T2', 'T2, мин'),
       ]),
-      section('Запаздывание и шкалы', 'Запаздывание L отсчитывается '
-        'от ступени MV до пересечения продолжений двух прямых. '
+      section('Запаздывание и шкалы', 'Запаздывание td '
+        '(L) измерьте от ступени MV до пересечения '
+        'продолжений двух прямых. Вводите td в минутах. '
         'Шкалы необходимы для нормирования ri.'),
       Wrap(spacing: 10, runSpacing: 14, children: [
-        input('delay', 'Запаздывание L, с'),
+        input('delay', 'Запаздывание td, мин'),
         input('mvLow', 'MV шкала, мин.'),
         input('mvHigh', 'MV шкала, макс.'),
         input('pvLow', 'PV шкала, мин.'),
@@ -167,19 +164,21 @@ class _IntegratingManualFormState extends State<IntegratingManualForm> {
       if (estimate != null) ...[
         const SizedBox(height: 12),
         Text('ri = ' +
-          estimate!.plant.gainPerSecond.toStringAsFixed(6) +
-          ' 1/с, L = ' +
-          estimate!.plant.delaySeconds.toStringAsFixed(2) + ' с',
+          estimate!.integrationRatePerMinute.toStringAsFixed(6) +
+          ' 1/мин, td = ' +
+          estimate!.deadTimeMinutes.toStringAsFixed(3) + ' мин',
           style: Theme.of(context).textTheme.titleMedium),
-        Text('T1 = ' + estimate!.t1Interval.toStringAsFixed(2) +
-          ' с; T2 = ' + estimate!.t2Interval.toStringAsFixed(2) + ' с'),
+        Text('T1 = ' + estimate!.t1IntervalMinutes.toStringAsFixed(3) +
+          ' мин; T2 = ' + estimate!.t2IntervalMinutes.toStringAsFixed(3) +
+          ' мин'),
         Text('Slope 1 = ' +
-          estimate!.beforeSlopeNormalized.toStringAsFixed(5) +
-          ' %/с; Slope 2 = ' +
-          estimate!.afterSlopeNormalized.toStringAsFixed(5) + ' %/с'),
+          estimate!.beforeSlopePercentPerMinute.toStringAsFixed(5) +
+          ' %/мин; Slope 2 = ' +
+          estimate!.afterSlopePercentPerMinute.toStringAsFixed(5) +
+          ' %/мин'),
         Text('DS = ' +
-          estimate!.deltaSlopeNormalized.toStringAsFixed(5) +
-          ' %/с; ΔMV = ' +
+          estimate!.deltaSlopePercentPerMinute.toStringAsFixed(5) +
+          ' %/мин; ΔMV = ' +
           estimate!.deltaMvNormalized.toStringAsFixed(3) + ' % шкалы'),
         const Text('Ручные четыре точки не подтверждают линейность '
           'участков статистически. Проверьте тренды и ограничения.'),

@@ -601,8 +601,16 @@ class _WebStepTestState extends State<WebStepTest> {
               latestPi!.display.proportionalValue.toStringAsFixed(4)),
             Text('PB = ' + latestPi!.pbPercent.toStringAsFixed(3) +
               ' %, Kc = ' + latestPi!.kcNormalized.toStringAsFixed(4) +
-              ', Ti = ' + latestPi!.tiSeconds.toStringAsFixed(2) +
-              ' с, Td = ' + latestPi!.tdSeconds.toStringAsFixed(2) + ' с'),
+              (settings.tuningMethod == TuningMethod.opticontrolsLevel
+                ? ', Ti = ' + (latestPi!.tiSeconds / 60).toStringAsFixed(3) +
+                    ' мин, Td = ' +
+                    (latestPi!.tdSeconds / 60).toStringAsFixed(3) + ' мин'
+                : ', Ti = ' + latestPi!.tiSeconds.toStringAsFixed(2) +
+                    ' с, Td = ' + latestPi!.tdSeconds.toStringAsFixed(2) + ' с')),
+            if (settings.tuningMethod == TuningMethod.opticontrolsLevel)
+              const Text('Внутри расчёта и сохранённых DCS-эквивалентах '
+                'время переводится в секунды. Перед применением '
+                'проверьте единицы конкретного блока DCS.'),
             Text('Направление действия для проверки: ' +
               latestPi!.display.recommendedAction),
             Text(latestPi!.display.profile.warning),

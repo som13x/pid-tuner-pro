@@ -9,6 +9,7 @@ on:
       - feature/v3.3-integrating-process-simc
       - feature/v3.4-opticontrols-level-tuning
       - feature/v3.5-opticontrols-four-points
+      - feature/v3.6-opticontrols-minute-intervals
     paths:
       - '.github/workflows/safari-preview.yml'
       - 'flutter_example/**'
@@ -93,7 +94,7 @@ jobs:
           retention-days: 90
 
       - name: Deploy browser preview to gh-pages branch
-        if: github.event_name == 'push' && github.ref == 'refs/heads/feature/v3.5-opticontrols-four-points'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/feature/v3.6-opticontrols-minute-intervals'
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
