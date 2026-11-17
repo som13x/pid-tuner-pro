@@ -1,53 +1,66 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pid_tuner_pro_core/dcs_controller_profiles.dart';
+import 'package:pid_tuner_pro_core/step_test_settings.dart';
+import 'fake_step_web_database.dart';
 import 'package:pid_tuner_pro_demo/web_main.dart';
 
 void main() {
-  testWidgets('Safari preview opens only Step Test on an iPhone-sized screen',
+  testWidgets('Safari opens Settings first on an iPhone-sized viewport',
       (tester) async {
     tester.view.physicalSize = const Size(430, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(const PidTunerWebPreview());
+    final db = FakeStepWebDatabase();
+    await tester.pumpWidget(PidTunerWebPreview(database: db));
     await tester.pumpAndSettle();
-
-    expect(find.text('PID Tuner Pro · Step Test'), findsOneWidget);
-    expect(find.text('Ручная оценка FOPDT по ступени MV'), findsOneWidget);
-    expect(find.text('Ручной ввод'), findsOneWidget);
-    expect(find.text('CSV / тренд'), findsOneWidget);
-    expect(find.byType(ChoiceChip), findsNWidgets(2));
-    expect(find.textContaining('Данные не сохраняются'), findsOneWidget);
-
-    // Navigation to other labs must not be reachable in Safari preview.
-    for (final section in [
-      'Auto Tune', 'Simulation', 'Circuit Studio', 'Stability',
-      'RL Tracking', 'Dual Valve LNG',
-    ]) {
-      expect(find.text(section), findsNothing);
-    }
+    expect(find.text('PID Tuner Pro'), findsOneWidget);
+    expect(find.text('Settings · параметры контура'), findsOneWidget);
+    expect(find.byKey(const Key('top-settings')), findsOneWidget);
+    expect(find.byKey(const Key('top-step-test')), findsOneWidget);
+    expect(find.byKey(const Key('settings-tag')), findsOneWidget);
+    db.close();
   });
 
-  testWidgets('CSV remains accessible from the Step Test method selector',
+  testWidgets('preloaded Settings open Step Test with selected manual method',
       (tester) async {
-    await tester.pumpWidget(const PidTunerWebPreview());
-    await tester.tap(find.text('CSV / тренд'));
+    final db = FakeStepWebDatabase(configuration: const StepTestSettings(
+      tag: 'PIC-17',
+      comments: 'Pressure test',
+      profileId: 'siemens-pcs7-pidconl',
+      controlledVariable: ControlledVariable.pressure,
+      tuningMethod: TuningMethod.imcConservative,
+      acquisition: StepAcquisition.manualDelayAndT63,
+    ));
+    await tester.pumpWidget(PidTunerWebPreview(database: db));
     await tester.pumpAndSettle();
-
-    expect(find.byType(ChoiceChip), findsNWidgets(2));
-    expect(find.text('Выбрать CSV-файл'), findsOneWidget);
-    expect(find.text('CSV-тренд'), findsOneWidget);
-    expect(find.text('Ручная оценка FOPDT по ступени MV'), findsNothing);
+    expect(find.text('Settings · параметры контура'), findsOneWidget);
+    expect(tester.widget<TextField>(
+      find.byKey(const Key('settings-tag'))).controller!.text, 'PIC-17');
+    await tester.tap(find.byKey(const Key('top-step-test')));
+    await tester.pumpAndSettle();
+    expect(find.text('Step Test · PIC-17'), findsOneWidget);
+    expect(find.text('Ручная оценка FOPDT по ступени MV'), findsOneWidget);
+    expect(find.text('Ручной ввод'), findsNothing);
+    expect(find.text('CSV / тренд'), findsNothing);
+    expect(find.text('Auto Tune'), findsNothing);
+    db.close();
   });
 
-  testWidgets('returning from CSV restores manual Step Test',
+  testWidgets('DCS selections are available in the Settings form',
       (tester) async {
-    await tester.pumpWidget(const PidTunerWebPreview());
-    await tester.tap(find.text('CSV / тренд'));
+    final db = FakeStepWebDatabase();
+    await tester.pumpWidget(PidTunerWebPreview(database: db));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Ручной ввод'));
-    await tester.pumpAndSettle();
-    expect(find.text('Ручная оценка FOPDT по ступени MV'), findsOneWidget);
+    final menu = tester.widget<DropdownButton<String>>(
+      find.descendant(
+        of: find.byKey(const Key('settings-system')),
+        matching: find.byType(DropdownButton<String>),
+      ));
+    expect(menu.items!.map((e) => e.value).toSet(),
+      DcsProfiles.all.map((p) => p.id).toSet());
+    db.close();
   });
 }

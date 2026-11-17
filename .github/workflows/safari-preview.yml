@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - feature/v3.1-safari-web-preview
+      - feature/v3.2-step-test-settings-indexeddb
     paths:
       - '.github/workflows/safari-preview.yml'
       - 'flutter_example/**'
@@ -89,7 +90,7 @@ jobs:
           retention-days: 90
 
       - name: Deploy browser preview to gh-pages branch
-        if: github.event_name == 'push' && github.ref == 'refs/heads/feature/v3.1-safari-web-preview'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/feature/v3.2-step-test-settings-indexeddb'
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}

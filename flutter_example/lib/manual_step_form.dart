@@ -7,7 +7,12 @@ import 'package:pid_tuner_pro_core/manual_step_identification.dart';
 /// It does not claim CSV fit quality or automatic measurement verification.
 class ManualStepForm extends StatefulWidget {
   final ValueChanged<ManualStepEstimate> onAccept;
-  const ManualStepForm({super.key, required this.onAccept});
+  final ManualStepMethod initialMethod;
+  final bool allowMethodSelection;
+
+  const ManualStepForm({super.key, required this.onAccept,
+    this.initialMethod = ManualStepMethod.knownDelayAndT63,
+    this.allowMethodSelection = true});
 
   @override
   State<ManualStepForm> createState() => _ManualStepFormState();
@@ -15,7 +20,7 @@ class ManualStepForm extends StatefulWidget {
 
 class _ManualStepFormState extends State<ManualStepForm> {
   late final Map<String, TextEditingController> fields;
-  ManualStepMethod method = ManualStepMethod.knownDelayAndT63;
+  late ManualStepMethod method;
   ManualStepEstimate? estimate;
   String? error;
   bool confirmed = false;
@@ -23,6 +28,7 @@ class _ManualStepFormState extends State<ManualStepForm> {
   @override
   void initState() {
     super.initState();
+    method = widget.initialMethod;
     final defaults = <String, String>{
       'mvBefore': '40', 'mvAfter': '50',
       'pvBefore': '800', 'pvAfter': '950',
@@ -128,7 +134,7 @@ class _ManualStepFormState extends State<ManualStepForm> {
       const Text('Способ оценки времени',
         style: TextStyle(fontWeight: FontWeight.bold)),
       const SizedBox(height: 8),
-      RadioGroup<ManualStepMethod>(
+      if (widget.allowMethodSelection) RadioGroup<ManualStepMethod>(
         groupValue: method,
         onChanged: (value) {
           if (value != null) setState(() {
