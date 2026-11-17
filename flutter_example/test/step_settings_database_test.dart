@@ -172,4 +172,30 @@ void main() {
     expect(find.text('Запаздывание L, с'), findsNothing);
     db.close();
   });
+
+  testWidgets('saving Settings unlocks Step Test and stores the TAG',
+      (tester) async {
+    tester.view.physicalSize = const Size(430, 3300);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final db = FakeStepWebDatabase();
+    await tester.pumpWidget(MaterialApp(home: WebPreviewHome(database: db)));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('settings-tag')), 'FIC-900');
+    await tester.ensureVisible(find.byKey(const Key('settings-save')));
+    await tester.tap(find.byKey(const Key('settings-save')));
+    await tester.pumpAndSettle();
+
+    expect(db.configuration, isNotNull);
+    expect(db.configuration!.tag, 'FIC-900');
+    expect(db.configuration!.profileId, DcsProfiles.yokogawaCentumVp.id);
+    expect(find.text('Step Test · FIC-900'), findsOneWidget);
+    expect(tester.widget<ChoiceChip>(
+      find.byKey(const Key('top-step-test'))).selected, true);
+    db.close();
+  });
+
 }
