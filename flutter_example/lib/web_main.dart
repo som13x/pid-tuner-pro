@@ -1,19 +1,24 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:pid_tuner_pro_core/auto_tune.dart';
 import 'package:pid_tuner_pro_core/step_identification.dart';
+import 'package:pid_tuner_pro_core/step_test_settings.dart';
 import 'package:pid_tuner_pro_core/trend_csv.dart';
 
 import 'manual_step_form.dart';
+import 'step_settings_screen.dart';
+import 'step_web_database.dart';
 
-/// Safari / Flutter Web Step Test only. Native SQLite / dart:io screens
-/// are intentionally excluded; no persistent browser projects are claimed.
+/// Safari Step Test. Native DCS control and other lab screens remain excluded.
+/// Settings and identification evidence use the browser's own IndexedDB.
 void main() => runApp(const PidTunerWebPreview());
 
 class PidTunerWebPreview extends StatelessWidget {
-  const PidTunerWebPreview({super.key});
+  final StepWebDatabase? database;
+  const PidTunerWebPreview({super.key, this.database});
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -24,73 +29,158 @@ class PidTunerWebPreview extends StatelessWidget {
       colorSchemeSeed: Colors.teal,
       brightness: Brightness.light,
     ),
-    home: const WebPreviewHome(),
+    home: WebPreviewHome(database: database),
   );
 }
 
 class WebPreviewHome extends StatefulWidget {
-  const WebPreviewHome({super.key});
+  final StepWebDatabase? database;
+  const WebPreviewHome({super.key, this.database});
 
   @override
   State<WebPreviewHome> createState() => _WebPreviewHomeState();
 }
 
 class _WebPreviewHomeState extends State<WebPreviewHome> {
-  Plant? currentModel;
-  String? source;
+  late final StepWebDatabase db;
+  bool ownsDatabase = false;
+  bool loading = true;
+  int selectedTab = 0; // Settings must precede Step Test.
+  String? error;
+  StepTestSettings? settings;
+  List<Map<String, dynamic>> results = const [];
 
-  void useModel(Plant plant, String origin) {
+  @override
+  void initState() {
+    super.initState();
+    ownsDatabase = widget.database == null;
+    db = widget.database ?? StepWebDatabase();
+    unawaited(restore());
+  }
+
+  Future<void> restore() async {
+    try {
+      await db.open();
+      final loadedSettings = await db.loadSettings();
+      final previousResults = await db.getResults();
+      if (!mounted) return;
+      setState(() {
+        settings = loadedSettings;
+        results = previousResults;
+        loading = false;
+        error = null;
+      });
+    } catch (e) {
+      if (mounted) setState(() {
+        error = 'Не удалось открыть базу IndexedDB: ' + e.toString();
+        loading = false;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    if (ownsDatabase) db.close();
+    super.dispose();
+  }
+
+  Future<void> saveSettings(StepTestSettings value) async {
+    await db.saveSettings(value); // Only proceed if transaction committed.
+    if (!mounted) return;
     setState(() {
-      currentModel = plant;
-      source = origin;
+      settings = value;
+      selectedTab = 1;
+      error = null;
     });
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content: Text('Модель K/T/L принята только для текущего сеанса. '
-        'Для применения на объекте требуется инженерная проверка.'),
-    ));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Settings сохранены в IndexedDB')),
+    );
+  }
+
+  Future<void> refreshResults() async {
+    final loaded = await db.getResults();
+    if (mounted) setState(() => results = loaded);
   }
 
   @override
   Widget build(BuildContext context) {
-    final model = currentModel;
+    if (loading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
     return Scaffold(
       appBar: AppBar(
-        title: const Text('PID Tuner Pro · Step Test'),
+        title: const Text('PID Tuner Pro'),
         backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
       ),
       body: SafeArea(child: Column(children: [
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          color: Theme.of(context).colorScheme.surfaceContainerLow,
-          child: Text(
-            model == null
-              ? 'Step Test в Safari: ручной ввод или CSV. '
-                'Данные не сохраняются после закрытия или обновления вкладки.'
-              : 'Модель текущего сеанса: K=' + model.gain.toStringAsFixed(3) +
-                ', T=' + model.tau.toStringAsFixed(2) + ' с, L=' +
-                model.delay.toStringAsFixed(2) + ' с. Источник: ' +
-                source! + '. Результат не сохранён.',
-            style: const TextStyle(fontSize: 12),
-          ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+          child: Row(children: [
+            Expanded(child: ChoiceChip(
+              key: const Key('top-settings'),
+              label: const Center(child: Text('1. Settings')),
+              selected: selectedTab == 0,
+              onSelected: (_) => setState(() => selectedTab = 0),
+            )),
+            const SizedBox(width: 12),
+            Expanded(child: ChoiceChip(
+              key: const Key('top-step-test'),
+              label: const Center(child: Text('2. Step Test')),
+              selected: selectedTab == 1,
+              onSelected: settings == null ? null
+                : (_) => setState(() => selectedTab = 1),
+            )),
+          ]),
         ),
-        Expanded(child: WebStepTest(onIdentified: useModel)),
+        if (error != null)
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Text(error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          ),
+        Expanded(
+          child: selectedTab == 0
+            ? StepSettingsScreen(
+                key: ValueKey(settings?.toJson().toString() ?? 'new'),
+                initialSettings: settings,
+                onSave: saveSettings,
+              )
+            : settings == null
+              ? const Center(child: Text('Сначала заполните Settings'))
+              : WebStepTest(
+                  key: ValueKey(settings!.toJson().toString()),
+                  settings: settings!,
+                  database: db,
+                  results: results,
+                  onResultSaved: refreshResults,
+                ),
+        ),
       ])),
     );
   }
 }
 
 class WebStepTest extends StatefulWidget {
-  final void Function(Plant plant, String source) onIdentified;
+  final StepTestSettings settings;
+  final StepWebDatabase database;
+  final List<Map<String, dynamic>> results;
+  final Future<void> Function() onResultSaved;
 
-  const WebStepTest({super.key, required this.onIdentified});
+  const WebStepTest({
+    super.key,
+    required this.settings,
+    required this.database,
+    required this.results,
+    required this.onResultSaved,
+  });
 
   @override
   State<WebStepTest> createState() => _WebStepTestState();
 }
 
 class _WebStepTestState extends State<WebStepTest> {
-  bool manualMode = true;
   final csv = TextEditingController();
   final mvHigh = TextEditingController(text: '100');
   final pvHigh = TextEditingController(text: '1000');
@@ -100,7 +190,14 @@ class _WebStepTestState extends State<WebStepTest> {
   List<TrendPoint>? fitted;
   String? error;
   String? fileName;
+  String? savedStatus;
+  String? tuningWarning;
+  StepPiEstimate? latestPi;
   bool loading = false;
+  bool saving = false;
+
+  bool get manualMode =>
+    widget.settings.acquisition != StepAcquisition.csvTrend;
 
   @override
   void dispose() {
@@ -130,9 +227,12 @@ class _WebStepTestState extends State<WebStepTest> {
         fileName = file.name;
         fit = null;
         error = null;
+        savedStatus = null;
+        latestPi = null;
       });
     } catch (e) {
-      if (mounted) setState(() => error = 'Импорт не выполнен: ' + e.toString());
+      if (mounted) setState(() =>
+        error = 'Импорт не выполнен: ' + e.toString());
     } finally {
       if (mounted) setState(() => loading = false);
     }
@@ -152,6 +252,8 @@ class _WebStepTestState extends State<WebStepTest> {
         measured = points;
         fitted = fittedResponse(points, result);
         error = null;
+        savedStatus = null;
+        latestPi = null;
       });
     } catch (e) {
       setState(() {
@@ -163,94 +265,232 @@ class _WebStepTestState extends State<WebStepTest> {
     }
   }
 
+  Future<void> saveResult({
+    required Plant plant,
+    required String source,
+    required Map<String, Object?> evidence,
+    String? originalCsv,
+  }) async {
+    if (saving) return;
+    setState(() {
+      saving = true;
+      error = null;
+      savedStatus = null;
+      tuningWarning = null;
+      latestPi = null;
+    });
+    try {
+      StepPiEstimate? pi;
+      String? warning = widget.settings.tuningBlockReason;
+      if (widget.settings.canCalculate) {
+        try {
+          pi = const StepPiCalculator().calculate(plant, widget.settings);
+        } catch (e) {
+          warning = 'PI не рассчитан: ' + e.toString();
+        }
+      }
+      await widget.database.addResult(
+        settings: widget.settings,
+        plant: plant,
+        source: source,
+        evidence: evidence,
+        piEstimate: pi,
+        originalCsv: originalCsv,
+      );
+      await widget.onResultSaved();
+      if (!mounted) return;
+      setState(() {
+        latestPi = pi;
+        tuningWarning = warning;
+        savedStatus = 'Step Test и контекст Settings сохранены в IndexedDB.';
+      });
+    } catch (e) {
+      if (mounted) setState(() =>
+        error = 'Результат НЕ сохранён: ' + e.toString());
+    } finally {
+      if (mounted) setState(() => saving = false);
+    }
+  }
+
+  void acceptManual(estimate) {
+    unawaited(saveResult(
+      plant: estimate.plant,
+      source: 'Manual Step ' + estimate.input.method.name,
+      evidence: Map<String, Object?>.from(estimate.evidence),
+    ));
+  }
+
+  void acceptCsv() {
+    final r = fit;
+    if (r == null) return;
+    unawaited(saveResult(
+      plant: r.plant,
+      source: 'Step Test CSV',
+      evidence: {
+        'method': 'csvFopdtGridFit',
+        'stepAtSeconds': r.stepAt,
+        'mvBefore': r.mvBefore,
+        'mvAfter': r.mvAfter,
+        'pvBefore': r.pvBefore,
+        'rmse': r.rmse,
+        'rSquared': r.rSquared,
+        'nrmse': r.normalizedRmse,
+        'fittedPoints': r.fittedPoints,
+        'suitableForAutoTune': r.suitableForAutoTune,
+        'fileName': fileName,
+        'mvSpanHigh': double.parse(mvHigh.text.replaceAll(',', '.')),
+        'pvSpanHigh': double.parse(pvHigh.text.replaceAll(',', '.')),
+      },
+      originalCsv: csv.text,
+    ));
+  }
+
   Widget numeric(String label, TextEditingController controller) =>
     SizedBox(width: 155, child: TextField(
       controller: controller,
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      decoration: InputDecoration(
-        labelText: label, border: const OutlineInputBorder(),
-        isDense: true),
+      decoration: InputDecoration(labelText: label,
+        border: const OutlineInputBorder(), isDense: true),
     ));
 
   @override
-  Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.all(16),
-    children: [
-      Text('Step Test', style: Theme.of(context).textTheme.titleLarge),
-      const SizedBox(height: 8),
-      Wrap(spacing: 8, children: [
-        ChoiceChip(
-          label: const Text('Ручной ввод'),
-          selected: manualMode,
-          onSelected: (_) => setState(() => manualMode = true)),
-        ChoiceChip(
-          label: const Text('CSV / тренд'),
-          selected: !manualMode,
-          onSelected: (_) => setState(() => manualMode = false)),
-      ]),
-      const SizedBox(height: 14),
-      if (manualMode)
-        ManualStepForm(onAccept: (estimate) {
-          widget.onIdentified(estimate.plant,
-            'Manual Step ' + estimate.input.method.name);
-        })
-      else ...[
-        const Text('Введите CSV time,mv,pv (секунды и инженерные '
-          'единицы) либо выберите файл в Safari.'),
-        const SizedBox(height: 10),
-        OutlinedButton.icon(
-          onPressed: loading ? null : loadCsv,
-          icon: const Icon(Icons.file_open),
-          label: const Text('Выбрать CSV-файл')),
-        if (fileName != null) Text('Файл: ' + fileName!),
+  Widget build(BuildContext context) {
+    final settings = widget.settings;
+    return ListView(
+      key: const Key('step-test-form'),
+      padding: const EdgeInsets.all(16),
+      children: [
+        Text('Step Test · ' + settings.tag,
+          style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 8),
-        TextField(
-          controller: csv, maxLines: 7,
-          decoration: const InputDecoration(
-            labelText: 'CSV-тренд', border: OutlineInputBorder(),
-            hintText: 'time,mv,pv\n0,40,800\n1,40,800')),
-        const SizedBox(height: 10),
-        Wrap(spacing: 10, runSpacing: 10, children: [
-          numeric('MV span high', mvHigh),
-          numeric('PV span high', pvHigh),
-          numeric('Время ступени, с', manualStepAt),
-        ]),
-        const SizedBox(height: 12),
-        FilledButton(
-          onPressed: identify,
-          child: const Text('Идентифицировать по CSV')),
-        if (error != null) Text(error!,
-          style: TextStyle(color: Theme.of(context).colorScheme.error)),
-        if (fit != null) ...[
+        Text(settings.profile.vendor + ' · ' + settings.profile.system +
+          ' · ' + settings.controlledVariable.title),
+        const SizedBox(height: 4),
+        Text('Метод: ' + settings.acquisition.title),
+        Text('Расчёт PI: ' + settings.tuningMethod.title),
+        const SizedBox(height: 8),
+        ExpansionTile(
+          title: const Text('Как проводить Step Test'),
+          children: [Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+            child: Text(settings.acquisition.instructions),
+          )],
+        ),
+        const SizedBox(height: 14),
+        if (manualMode)
+          ManualStepForm(
+            key: ValueKey(settings.acquisition.name),
+            initialMethod:
+              settings.acquisition == StepAcquisition.manualTwoPoints
+                ? ManualStepMethod.twoResponseTimes
+                : ManualStepMethod.knownDelayAndT63,
+            allowMethodSelection: false,
+            onAccept: acceptManual,
+          )
+        else ...[
+          const Text('CSV time,mv,pv: время в секундах; MV/PV '
+            'в инженерных единицах.'),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: loading ? null : loadCsv,
+            icon: const Icon(Icons.file_open),
+            label: const Text('Выбрать CSV-файл')),
+          if (fileName != null) Text('Файл: ' + fileName!),
+          const SizedBox(height: 8),
+          TextField(
+            key: const Key('step-csv-text'),
+            controller: csv, maxLines: 7,
+            decoration: const InputDecoration(
+              labelText: 'CSV-тренд',
+              border: OutlineInputBorder(),
+              hintText: 'time,mv,pv\n0,40,800\n1,40,800')),
+          const SizedBox(height: 10),
+          Wrap(spacing: 10, runSpacing: 10, children: [
+            numeric('MV span high', mvHigh),
+            numeric('PV span high', pvHigh),
+            numeric('Время ступени, с', manualStepAt),
+          ]),
           const SizedBox(height: 12),
-          Text('K = ' + fit!.plant.gain.toStringAsFixed(4) +
-            ', T = ' + fit!.plant.tau.toStringAsFixed(2) +
-            ' с, L = ' + fit!.plant.delay.toStringAsFixed(2) + ' с',
-            style: Theme.of(context).textTheme.titleMedium),
-          Text('R² = ' + fit!.rSquared.toStringAsFixed(3) +
-            ', NRMSE = ' + fit!.normalizedRmse.toStringAsFixed(3)),
-          Text(fit!.suitableForAutoTune
-            ? 'Формальные критерии качества выполнены. Нужна проверка инженера.'
-            : 'Качество идентификации недостаточно для принятия модели.'),
-          if (fit!.suitableForAutoTune)
+          FilledButton(
+            onPressed: identify,
+            child: const Text('Идентифицировать по CSV')),
+          if (fit != null) ...[
+            const SizedBox(height: 12),
+            Text('K = ' + fit!.plant.gain.toStringAsFixed(4) +
+              ', T = ' + fit!.plant.tau.toStringAsFixed(2) +
+              ' с, L = ' + fit!.plant.delay.toStringAsFixed(2) + ' с',
+              style: Theme.of(context).textTheme.titleMedium),
+            Text('R² = ' + fit!.rSquared.toStringAsFixed(3) +
+              ', NRMSE = ' + fit!.normalizedRmse.toStringAsFixed(3)),
+            Text(fit!.suitableForAutoTune
+              ? 'Формальные критерии качества выполнены. '
+                'Требуется инженерная проверка.'
+              : 'Качество идентификации недостаточно '
+                'для автоматического переноса настроек.'),
             FilledButton.icon(
-              icon: const Icon(Icons.check_circle_outline),
-              onPressed: () => widget.onIdentified(
-                fit!.plant, 'Step Test CSV'),
-              label: const Text('Принять оценочную модель')),
-          const Text('Измеренный и расчётный отклик PV · % шкалы'),
-          SizedBox(height: 220,
-            child: CustomPaint(
-              painter: _WebCsvPlot(measured!, fitted!),
-              child: const SizedBox.expand())),
+              key: const Key('step-csv-save'),
+              onPressed: saving ? null : acceptCsv,
+              icon: const Icon(Icons.save_outlined),
+              label: const Text('Сохранить Step Test в базе данных')),
+            const SizedBox(height: 12),
+            const Text('Измеренная и расчётная PV · % шкалы'),
+            SizedBox(height: 220,
+              child: CustomPaint(
+                painter: _WebCsvPlot(measured!, fitted!),
+                child: const SizedBox.expand())),
+          ],
         ],
+        if (error != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Text(error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error))),
+        if (savedStatus != null) ...[
+          const SizedBox(height: 14),
+          Text(savedStatus!,
+            key: const Key('step-saved-status'),
+            style: const TextStyle(fontWeight: FontWeight.w600)),
+          if (latestPi != null) ...[
+            Text('Предварительная настройка PI (' +
+              settings.tuningMethod.title + ')',
+              style: Theme.of(context).textTheme.titleMedium),
+            Text(latestPi!.display.profile.proportionalLabel + ': ' +
+              latestPi!.display.proportionalValue.toStringAsFixed(4)),
+            Text('PB = ' + latestPi!.pbPercent.toStringAsFixed(3) +
+              ' %, Kc = ' + latestPi!.kcNormalized.toStringAsFixed(4) +
+              ', Ti = ' + latestPi!.tiSeconds.toStringAsFixed(2) +
+              ' с, Td = 0 с'),
+            Text('Направление действия для проверки: ' +
+              latestPi!.display.recommendedAction),
+            Text(latestPi!.display.profile.warning),
+          ],
+          if (tuningWarning != null) Text(tuningWarning!),
+          const Text('Не переносить параметры в DCS без '
+            'проверки блока, единиц, шкал и устойчивости.'),
+        ],
+        if (widget.results.isNotEmpty) ...[
+          const SizedBox(height: 20),
+          Text('История Step Test · IndexedDB',
+            style: Theme.of(context).textTheme.titleMedium),
+          Text('Записей: ' + widget.results.length.toString()),
+          for (final row in widget.results.take(10))
+            Card(child: ListTile(
+              title: Text(((row['settings'] as Map)['tag'] as String) +
+                ' · ' + (row['source'] as String)),
+              subtitle: Text(
+                'K=' + ((row['model'] as Map)['K'] as num).toStringAsFixed(3) +
+                ' T=' + ((row['model'] as Map)['T'] as num).toStringAsFixed(2) +
+                ' с L=' + ((row['model'] as Map)['L'] as num).toStringAsFixed(2) +
+                ' с | ' + (row['savedAt'] as String)),
+            )),
+        ],
+        const SizedBox(height: 12),
+        const Text('Step Test не выполняет реальное воздействие на объект. '
+          'База хранится локально в Safari; удаление данных сайта '
+          'или приватный режим могут уничтожить записи.'),
       ],
-      const SizedBox(height: 14),
-      const Text('Все результаты являются оценочными. Из браузера '
-        'не выполняются команды в DCS. Не меняйте настройки рабочего '
-        'регулятора без инженерной проверки.'),
-    ],
-  );
+    );
+  }
 }
 
 class _WebCsvPlot extends CustomPainter {
