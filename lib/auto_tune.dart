@@ -165,7 +165,7 @@ class AutoTune {
       }
       if (keepSamples) samples.add(Sample(t + c.dt, pv, mv, c.sp));
     }
-    final recovery = math.max(0, lastOutside - c.disturbanceAt);
+    final recovery = math.max(0, lastOutside - c.disturbanceAt).toDouble();
     final recovered = stable &&
         lastOutside <= c.duration - c.minRecoveryWindow &&
         terminal <= c.recoveryBand;
