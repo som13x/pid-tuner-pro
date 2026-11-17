@@ -113,5 +113,5 @@ jobs:
             else
               echo "- Deployment skipped in PR, it runs on preview-branch pushes."
             fi
-            echo "- Preview is session-only: web has no SQLite project storage/backup yet."
+            echo "- Safari Settings and Step Test models are persisted in IndexedDB; no cloud sync/backup yet."
           } >> "$GITHUB_STEP_SUMMARY"
