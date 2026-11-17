@@ -79,14 +79,33 @@ class _TuningCalculationScreenState extends State<TuningCalculationScreen> {
     final minutes = widget.settings.tuningMethod == TuningMethod.opticontrolsLevel;
     final factor = minutes ? 60.0 : 1.0;
     final unit = minutes ? 'мин' : 'с';
+    Widget metric(String label, String value) => Container(
+      width: 136,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF1F6F9),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label, style: const TextStyle(fontSize: 12, color: Color(0xFF506476))),
+        const SizedBox(height: 5),
+        Text(value, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w700)),
+      ]),
+    );
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text('Kc = ${pi.kcNormalized.toStringAsFixed(4)} · PB = ${pi.pbPercent.toStringAsFixed(3)} %'),
-      Text('Ti = ${(pi.tiSeconds / factor).toStringAsFixed(3)} $unit · '
-          'Td = ${(pi.tdSeconds / factor).toStringAsFixed(3)} $unit'),
-      Text('${pi.display.profile.proportionalLabel} = '
-          '${pi.display.proportionalValue.toStringAsFixed(4)}'),
+      Wrap(spacing: 8, runSpacing: 8, children: [
+        metric('Kc', pi.kcNormalized.toStringAsFixed(4)),
+        metric('PB', '${pi.pbPercent.toStringAsFixed(3)} %'),
+        metric('Ti', '${(pi.tiSeconds / factor).toStringAsFixed(3)} $unit'),
+        metric('Td', '${(pi.tdSeconds / factor).toStringAsFixed(3)} $unit'),
+      ]),
+      const SizedBox(height: 10),
+      Text('${pi.display.profile.proportionalLabel}: '
+          '${pi.display.proportionalValue.toStringAsFixed(4)}',
+          style: const TextStyle(fontWeight: FontWeight.w600)),
+      const SizedBox(height: 6),
       Text(pi.display.profile.warning,
-          style: const TextStyle(fontSize: 12)),
+          style: const TextStyle(fontSize: 12, color: Color(0xFF506476))),
     ]);
   }
 
@@ -99,10 +118,15 @@ class _TuningCalculationScreenState extends State<TuningCalculationScreen> {
     return ListView(padding: const EdgeInsets.all(16), children: [
       Text('Tuning Calculation', style: Theme.of(context).textTheme.titleLarge),
       const SizedBox(height: 8),
-      Text('Контур: ${widget.settings.tag}'),
+      Text('Контур: ${widget.settings.tag}',
+          style: Theme.of(context).textTheme.titleMedium),
       Text('DCS: ${widget.settings.profile.vendor} · ${widget.settings.profile.system}'),
       Text('Метод: ${widget.settings.tuningMethod.title}'),
-      const Text('Выбор DCS и метода выполняется только в Settings.'),
+      const Padding(
+        padding: EdgeInsets.only(top: 8),
+        child: Text('Параметры DCS и метод задаются только в Settings.',
+          style: TextStyle(color: Color(0xFF506476))),
+      ),
       if (error != null) Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
       const SizedBox(height: 16),
       Text('Сохранённые Step Tests (${current.length})',
@@ -137,6 +161,7 @@ class _TuningCalculationScreenState extends State<TuningCalculationScreen> {
           style: Theme.of(context).textTheme.titleMedium),
       for (final row in history)
         Card(child: ListTile(
+          leading: const Icon(Icons.history),
           title: Text('${row['source']} · ${row['savedAt']}'),
           subtitle: Text('Контур: ${(row['settings'] as Map)['tag']} · '
               'Метод: ${(row['settings'] as Map)['tuningMethod']}\n'
