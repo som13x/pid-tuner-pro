@@ -16,6 +16,7 @@ import 'model_history_screen.dart';
 import 'simulation_screen.dart';
 import 'dual_valve_screen.dart';
 import 'rl_tracking_screen.dart';
+import 'circuit_studio_screen.dart';
 
 class ProjectHome extends StatefulWidget {
   const ProjectHome({super.key});
@@ -272,6 +273,9 @@ class _ProjectHomeState extends State<ProjectHome> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('PID Tuner Pro'), actions: [
+      IconButton(tooltip: 'Circuit Studio demo',
+        onPressed: () => _open(const CircuitStudioScreen()),
+        icon: const Icon(Icons.account_tree_outlined)),
       IconButton(tooltip: 'Обновить', onPressed: _load, icon: const Icon(Icons.refresh)),
       PopupMenuButton<String>(
         tooltip: 'Резервные копии',
@@ -320,6 +324,18 @@ class _ProjectHomeState extends State<ProjectHome> {
                   _open(SimulationScreen(initialModel: p.identifiedModel,
                     profile: DcsProfiles.forProject(p.vendor, p.controllerBlock))),
                   child: const Text('Simulation')),
+                OutlinedButton(
+                  onPressed: () => _open(CircuitStudioScreen(
+                    loopTag: p.tag,
+                    initialWiring: p.latestCircuitWiring,
+                    onSave: (graph) async {
+                      // Fetch the latest project, not the stale expansion-tile
+                      // snapshot; repeated saves must preserve append-only history.
+                      final current = _projects.firstWhere((q) => q.id == p.id);
+                      await _update(current, current.withCircuitWiring(graph));
+                    },
+                  )),
+                  child: const Text('Circuit Studio')),
                 OutlinedButton(onPressed: () => _open(DualValveScreen(loopTag: p.tag)),
                   child: const Text('Dual-Valve LNG')),
                 OutlinedButton(onPressed: () => _open(RlTrackingScreen(

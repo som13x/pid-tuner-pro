@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:pid_tuner_pro_core/cascade_circuit.dart';
 
 /// Local project metadata. Models are deliberately not shared between loops.
 class LoopProject {
@@ -41,6 +42,34 @@ class LoopProject {
       id: id, tag: tag, description: description,
       vendor: vendorName, controllerBlock: blockName,
       createdAt: createdAt, identifiedModel: identifiedModel,
+      history: [...history, event],
+    );
+  }
+
+  /// Stored as an append-only event, so earlier schematics remain auditable
+  /// and the existing SQLite/backup schemas do not require a migration.
+  Map<String, dynamic>? get latestCircuitWiring {
+    for (final event in history.reversed) {
+      if (event['type'] == 'circuitWiring' && event['wiring'] is Map) {
+        return Map<String, dynamic>.from(event['wiring'] as Map);
+      }
+    }
+    return null;
+  }
+
+  LoopProject withCircuitWiring(Map<String, dynamic> wiring) {
+    final validated = CircuitWiring.fromJson(wiring);
+    final event = <String, Object?>{
+      'type': 'circuitWiring',
+      'at': DateTime.now().toUtc().toIso8601String(),
+      'wiring': validated.toJson(),
+      'wiringOnly': true,
+      'verifiedForDcsDeployment': false,
+    };
+    return LoopProject(
+      id: id, tag: tag, description: description, vendor: vendor,
+      controllerBlock: controllerBlock, createdAt: createdAt,
+      identifiedModel: identifiedModel,
       history: [...history, event],
     );
   }
