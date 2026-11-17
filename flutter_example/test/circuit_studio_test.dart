@@ -89,7 +89,7 @@ void main() {
         saved = wiring;
       }),
     ));
-    await tester.tap(find.text('Сохранить схему в проект'));
+    await tester.tap(find.byTooltip('Сохранить схему'));
     await tester.pumpAndSettle();
     expect(saved, isNotNull);
     expect(CircuitWiring.fromJson(saved!).links, hasLength(4));
