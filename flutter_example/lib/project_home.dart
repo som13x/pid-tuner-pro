@@ -162,6 +162,54 @@ class _ProjectHomeState extends State<ProjectHome> {
     }
   }
 
+  Future<void> _changeProfile(LoopProject project) async {
+    final current = DcsProfiles.forProject(project.vendor, project.controllerBlock);
+    var profile = current ?? DcsProfiles.yokogawaCentumVp;
+    final approved = await showDialog<bool>(context: context,
+      builder: (ctx) => StatefulBuilder(builder: (context, refreshDialog) =>
+        AlertDialog(
+          title: Text('Профиль DCS · ' + project.tag),
+          content: SingleChildScrollView(child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Текущий: ' + project.vendor + ' · ' + project.controllerBlock),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<String>(
+                initialValue: profile.id, isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Профиль'),
+                items: [
+                  for (final p in DcsProfiles.all)
+                    DropdownMenuItem(value: p.id, child: Text(p.title,
+                      overflow: TextOverflow.ellipsis)),
+                ],
+                onChanged: (id) {
+                  if (id != null) refreshDialog(() => profile = DcsProfiles.byId(id));
+                },
+              ),
+              const SizedBox(height: 12),
+              const Text('Изменение профиля не меняет K/T/L и прошлые отчёты. '
+                  'Перед применением настроек проверьте блок, алгоритм, '
+                  'масштабирование PV/MV и направление действия.'),
+            ],
+          )),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Отмена')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Сохранить профиль')),
+          ],
+        )));
+    if (!mounted || approved != true) return;
+    try {
+      await _update(project, project.withControllerProfile(
+        vendorName: profile.storedVendor, blockName: profile.storedBlock));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Ошибка изменения профиля: $e')));
+    }
+  }
+
   Future<void> _remove(LoopProject project) async {
     final confirmed = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
       title: Text('Удалить ${project.tag}?'),
@@ -254,6 +302,7 @@ class _ProjectHomeState extends State<ProjectHome> {
             children: [
               Wrap(spacing: 8, children: [
                 OutlinedButton(onPressed: () => _stepTest(p), child: const Text('Step Test')),
+                OutlinedButton(onPressed: () => _changeProfile(p), child: const Text('Профиль DCS')),
                 OutlinedButton(onPressed: _store == null ? null : () async {
                   await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) =>
                     ModelHistoryScreen(db: _store!, loopId: p.id, loopTag: p.tag)));
