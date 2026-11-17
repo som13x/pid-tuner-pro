@@ -7,7 +7,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:pid_tuner_pro_core/auto_tune.dart';
 import 'package:pid_tuner_pro_core/dcs_controller_profiles.dart';
 import 'main.dart' show AutoTuneScreen, StepTestScreen;
-import 'package:pid_tuner_pro_core/step_identification.dart';
 import 'stability_screen.dart' show StabilityScreen;
 import 'project_store.dart';
 import 'sqlite_project_store.dart';
