@@ -1,33 +1,36 @@
-# PID Tuner Pro v3.1 — Safari Web Preview
+# PID Tuner Pro v3.1 — Safari Step Test Preview
 
-This is a **Flutter Web preview**, not a signed iOS application. It
-uses the same Dart core and the pure Flutter simulator screens as the
-Android and iOS versions.
+This is a Flutter Web **Step Test–only** preview for iPhone Safari,
+not a signed native iOS app. Android and native iOS builds are unchanged.
 
-## Safari-compatible functionality
+## Features retained
 
-- Manual FOPDT Step Test using 63.21% or two response times
-- CSV Step Test via document picker or pasted \`time,mv,pv\` trend
-- Offline Auto Tune with K/T/L from Step Test or manual input
-- Closed-loop Simulation, Circuit Studio, Stability Studio,
-  RL Tracking Lab, and Dual Valve LNG scenario
-- Model accepted from Step Test is available to the simulation and
-  Auto Tune screens while the page remains open
+- Manual Step Test: enter MV/PV values and low/high spans, determine
+  FOPDT K/T/L by known dead time and 63.21% time or by the
+  28.35% and 63.21% response times.
+- CSV Step Test: import a local CSV/TXT through Safari or paste a
+  time,mv,pv trend, identify FOPDT and display fit quality.
+- Predicted/observed trend visualizations and estimated model results.
+- Two Step Test input modes: **Ручной ввод** and **CSV / тренд**.
 
-**Deliberate limits of this initial browser preview:**
+The Safari interface has **no section/navigation tabs** for Auto Tune,
+Simulation, Circuit Studio, Stability, RL Tracking or Dual Valve LNG.
+Those features remain available in the Android/native iOS source app,
+but are intentionally excluded from this Safari build.
 
-- No persistent loop projects, native SQLite, model history or backups.
-  All accepted models and wiring exist **only in this browser tab**.
-- Refreshing or closing Safari discards the session.
-- No DCS connection or plant control.
-- No claims of validated plant performance from synthetic simulations.
-- Some physical keyboard/file dialogs differ between browser and
-  the native iOS app.
-- This release does **not** include an iPhone IPA or a TestFlight build.
+## Browser-specific limits
+
+- No persistent project store, SQLite, model history or backup support.
+  Results exist only while the browser tab stays open.
+- A model accepted inside Step Test is marked session-only. Reloading
+  Safari discards it.
+- No plant connection, actual MV step command or DCS setting changes.
+- A synthetic FOPDT graph is not a measurement. Manual estimates
+  have no statistical fit quality metrics.
 
 ## Build
 
-From the repository root with Flutter stable:
+From repository root with Flutter stable:
 
     cd flutter_example
     flutter create --platforms=web --project-name pid_tuner_pro_demo --no-pub .
@@ -35,25 +38,14 @@ From the repository root with Flutter stable:
     flutter test
     flutter build web --release --target lib/web_main.dart --base-href /pid-tuner-pro/
 
-Web entry point: \`flutter_example/lib/web_main.dart\`.
+Entry point: \`flutter_example/lib/web_main.dart\`.
 
-## GitHub Pages publishing
+Workflow \`.github/workflows/safari-preview.yml\` runs tests, builds
+web and pushes static files to \`gh-pages\` on
+\`feature/v3.1-safari-web-preview\` pushes.
 
-Workflow \`.github/workflows/safari-preview.yml\` runs on pushes to
-\`feature/v3.1-safari-web-preview\`, verifies Dart / Flutter, publishes
-the compiled site as a downloadable artifact and pushes it to
-the \`gh-pages\` branch.
+Deployment URL once GitHub Pages is configured and live:
+https://som13x.github.io/pid-tuner-pro/
 
-The repository owner must enable Pages in:
-**Settings → Pages → Build and deployment → Deploy from a branch**,
-then choose **gh-pages / (root)**.
-
-The expected URL, once the Pages configuration is enabled and its
-deployment completes:
-
-    https://som13x.github.io/pid-tuner-pro/
-
-Do **not** claim this URL is live until it has been verified.
-
-This preview needs no Apple Developer certificate or Mac to open on
-iPhone Safari. Browser persistence / web backups are separate future work.
+On GitHub, Pages should be configured to serve **gh-pages / (root)**.
+Check the URL after the workflow completes before declaring it live.
