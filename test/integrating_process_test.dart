@@ -137,40 +137,104 @@ void main() {
       throwsStateError);
   });
 
-  test('manual ramp accounts for pre-existing PV slope', () {
+  test('OptiControls 4-point estimator calculates both PV slopes', () {
     final estimate = const IntegratingManualEstimator().estimate(
       const IntegratingManualInput(
         mvBefore: 40, mvAfter: 50,
-        pvAtT1: 45, pvAtT2: 55,
-        t1Seconds: 20, t2Seconds: 40,
-        baselineSlopePerSecond: 0.1, delaySeconds: 5,
+        pv1: 35, pv2: 36, pv3: 45, pv4: 55,
+        t1Seconds: -20, t2Seconds: -10,
+        t3Seconds: 20, t4Seconds: 40,
+        delaySeconds: 5,
         mvSpanLow: 0, mvSpanHigh: 100,
         pvSpanLow: 0, pvSpanHigh: 100,
       ));
-    expect(estimate.plant.gainPerSecond, closeTo(.04, 1e-12));
-    expect(estimate.afterSlopeNormalized, closeTo(.5, 1e-12));
+    expect(estimate.t1Interval, 10);
+    expect(estimate.t2Interval, 20);
     expect(estimate.beforeSlopeNormalized, closeTo(.1, 1e-12));
+    expect(estimate.afterSlopeNormalized, closeTo(.5, 1e-12));
+    expect(estimate.deltaSlopeNormalized, closeTo(.4, 1e-12));
+    expect(estimate.deltaMvNormalized, 10);
+    expect(estimate.plant.gainPerSecond, closeTo(.04, 1e-12));
+    expect(estimate.evidence['method'], 'opticontrolsManualFourPoints');
+    expect(estimate.evidence['pv1'], 35);
+    expect(estimate.evidence['pv2'], 36);
+    expect(estimate.evidence['pv3'], 45);
+    expect(estimate.evidence['pv4'], 55);
+    expect(estimate.evidence['t1Seconds'], -20);
+    expect(estimate.evidence['t2Seconds'], -10);
+    expect(estimate.evidence['t3Seconds'], 20);
+    expect(estimate.evidence['t4Seconds'], 40);
+    expect(estimate.evidence['T1Seconds'], 10);
+    expect(estimate.evidence['T2Seconds'], 20);
     expect(estimate.evidence['qualityMetricsAvailable'], false);
+
+    // Use the measured ri in the actual OptiControls PI correlation.
+    final pi = const StepPiCalculator().calculateIntegrating(
+      estimate.plant, config());
+    expect(pi.kcNormalized, closeTo(2.25, 1e-12));
+    expect(pi.tiSeconds, closeTo(33.3, 1e-12));
   });
 
-  test('manual ramp rejects zero MV, negative lag, time inversion', () {
-    const base = IntegratingManualInput(
-      mvBefore: 40, mvAfter: 40,
-      pvAtT1: 45, pvAtT2: 55,
-      t1Seconds: 20, t2Seconds: 40, delaySeconds: 5,
+  test('4-point estimator normalizes non-100 PV and MV spans', () {
+    final estimate = const IntegratingManualEstimator().estimate(
+      const IntegratingManualInput(
+        mvBefore: 60, mvAfter: 80, // 10% of span 0..200
+        pv1: 400, pv2: 404, // 0.4 EU/s -> 0.2%/s of span
+        pv3: 430, pv4: 446, // 0.8 EU/s -> 0.4%/s
+        t1Seconds: -20, t2Seconds: -10,
+        t3Seconds: 30, t4Seconds: 50,
+        delaySeconds: 5,
+        mvSpanLow: 0, mvSpanHigh: 200,
+        pvSpanLow: 300, pvSpanHigh: 500,
+      ));
+    expect(estimate.beforeSlopeNormalized, closeTo(.2, 1e-12));
+    expect(estimate.afterSlopeNormalized, closeTo(.4, 1e-12));
+    expect(estimate.deltaSlopeNormalized, closeTo(.2, 1e-12));
+    expect(estimate.deltaMvNormalized, 10);
+    expect(estimate.plant.gainPerSecond, closeTo(.02, 1e-12));
+  });
+
+  test('4-point estimator preserves sign of negative MV step', () {
+    final estimate = const IntegratingManualEstimator().estimate(
+      const IntegratingManualInput(
+        mvBefore: 50, mvAfter: 40,
+        pv1: 35, pv2: 36, pv3: 45, pv4: 55,
+        t1Seconds: -20, t2Seconds: -10,
+        t3Seconds: 20, t4Seconds: 40,
+        delaySeconds: 5,
+        mvSpanLow: 0, mvSpanHigh: 100,
+        pvSpanLow: 0, pvSpanHigh: 100,
+      ));
+    expect(estimate.plant.gainPerSecond, closeTo(-.04, 1e-12));
+  });
+
+  test('manual four-point measurement validates MV and observation times', () {
+    IntegratingManualInput sample({
+      double mvAfter = 50,
+      double t1 = -20, double t2 = -10,
+      double t3 = 20, double t4 = 40,
+      double delay = 5,
+    }) => IntegratingManualInput(
+      mvBefore: 40, mvAfter: mvAfter,
+      pv1: 35, pv2: 36, pv3: 45, pv4: 55,
+      t1Seconds: t1, t2Seconds: t2,
+      t3Seconds: t3, t4Seconds: t4,
+      delaySeconds: delay,
       mvSpanLow: 0, mvSpanHigh: 100,
       pvSpanLow: 0, pvSpanHigh: 100,
     );
-    expect(() => const IntegratingManualEstimator().estimate(base),
+    const estimator = IntegratingManualEstimator();
+    expect(() => estimator.estimate(sample(mvAfter: 40)),
       throwsArgumentError);
-    expect(() => const IntegratingManualEstimator().estimate(
-      const IntegratingManualInput(
-        mvBefore: 40, mvAfter: 50,
-        pvAtT1: 45, pvAtT2: 55,
-        t1Seconds: 2, t2Seconds: 40, delaySeconds: 5,
-        mvSpanLow: 0, mvSpanHigh: 100,
-        pvSpanLow: 0, pvSpanHigh: 100,
-      )), throwsArgumentError);
+    expect(() => estimator.estimate(sample(t1: -10, t2: -20)),
+      throwsArgumentError);
+    expect(() => estimator.estimate(sample(t2: 1)), throwsArgumentError);
+    expect(() => estimator.estimate(sample(t3: 4)), throwsArgumentError);
+    expect(() => estimator.estimate(sample(t4: 19)), throwsArgumentError);
+    expect(() => estimator.estimate(sample(delay: -1)),
+      throwsArgumentError);
+    expect(() => estimator.estimate(sample(t3: double.nan)),
+      throwsArgumentError);
   });
 
   test('IPDT CSV fit recovers Ki and L despite baseline drift', () {
