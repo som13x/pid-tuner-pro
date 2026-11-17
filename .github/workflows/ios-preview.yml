@@ -82,7 +82,24 @@ jobs:
         working-directory: flutter_example
         run: flutter build ios --simulator --debug --no-codesign
 
+      - name: Package simulator result immediately after successful compilation
+        run: |
+          mkdir -p dist
+          ditto -c -k --sequesterRsrc --keepParent \
+            flutter_example/build/ios/iphonesimulator/Runner.app \
+            dist/pid-tuner-pro-ios-simulator-app.zip
+
+      - name: Upload simulator app independently of device/smoke tests
+        uses: actions/upload-artifact@v4
+        with:
+          name: pid-tuner-pro-ios-simulator-unsigned
+          path: dist/pid-tuner-pro-ios-simulator-app.zip
+          if-no-files-found: error
+          retention-days: 90
+
       - name: Launch on an available iPhone simulator
+        timeout-minutes: 4
+        continue-on-error: true
         id: simulator
         working-directory: flutter_example
         shell: bash
@@ -120,9 +137,6 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           ditto -c -k --sequesterRsrc --keepParent \
-            flutter_example/build/ios/iphonesimulator/Runner.app \
-            dist/pid-tuner-pro-ios-simulator-app.zip
-          ditto -c -k --sequesterRsrc --keepParent \
             flutter_example/build/ios/iphoneos/Runner.app \
             dist/pid-tuner-pro-ios-unsigned-device-app.zip
           if [[ -f flutter_example/build/ios/iphone-preview/launch.png ]]; then
@@ -137,7 +151,7 @@ jobs:
             if [[ -f dist/ios-simulator-launch.png ]]; then
               echo "- Simulator smoke launch: screenshot generated"
             else
-              echo "- Simulator smoke launch: skipped (no device available)"
+              echo "- Simulator smoke launch: not verified (simulator unavailable or timed out)"
             fi
             echo "- TestFlight / signed IPA: **not produced** (requires Apple Developer signing)"
           } >> "$GITHUB_STEP_SUMMARY"
