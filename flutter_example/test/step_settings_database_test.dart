@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:idb_shim/idb_shim.dart';
 import 'package:pid_tuner_pro_core/auto_tune.dart';
+import 'package:pid_tuner_pro_core/integrating_step_identification.dart';
 import 'package:pid_tuner_pro_core/dcs_controller_profiles.dart';
 import 'package:pid_tuner_pro_core/step_test_settings.dart';
 import 'package:pid_tuner_pro_demo/step_web_database.dart';
@@ -101,6 +102,87 @@ void main() {
     );
     await expectLater(db.saveSettings(invalid), throwsArgumentError);
     expect((await db.loadSettings())!.tag, 'FIC-221');
+    db.close();
+  });
+
+  test('IndexedDB stores typed IPDT results independently of FOPDT',
+      () async {
+    final factory = newIdbFactoryMemory();
+    final db = StepWebDatabase(factory: factory);
+    const ipdt = StepTestSettings(
+      tag: 'LIC-50',
+      profileId: 'yokogawa-centum-vp-pid',
+      controlledVariable: ControlledVariable.level,
+      tuningMethod: TuningMethod.integratingProcessSimc,
+      acquisition: StepAcquisition.manualIntegratingSlope,
+      integratingProcessConfirmed: true,
+      lambdaSeconds: 30,
+    );
+    await db.saveSettings(ipdt);
+    final pi = const StepPiCalculator().calculateIntegrating(
+      const IntegratingPlant(gainPerSecond: .04, delaySeconds: 5), ipdt);
+    await db.addIntegratingResult(
+      settings: ipdt,
+      plant: const IntegratingPlant(gainPerSecond: .04, delaySeconds: 5),
+      source: 'Manual Integrating Step',
+      evidence: {'method': 'manualIntegratingRamp', 'slope': 0.4},
+      piEstimate: pi,
+    );
+    db.close();
+    final reopened = StepWebDatabase(factory: factory);
+    final storedSettings = await reopened.loadSettings();
+    expect(storedSettings!.tuningMethod,
+      TuningMethod.integratingProcessSimc);
+    final rows = await reopened.getResults();
+    expect(rows, hasLength(1));
+    final model = rows.single['model'] as Map;
+    expect(model['type'], 'IPDT');
+    expect(model['KiPerSecond'], .04);
+    expect(model['L'], 5);
+    expect(model.containsKey('T'), false);
+    expect((rows.single['evidence'] as Map)['method'],
+      'manualIntegratingRamp');
+    expect((rows.single['settings'] as Map)['lambdaSeconds'], 30);
+    expect((rows.single['piEstimate'] as Map)['tiSeconds'], 140);
+    reopened.close();
+  });
+
+  testWidgets('saved integrating choice opens true ramp model form',
+      (tester) async {
+    final db = FakeStepWebDatabase(configuration: const StepTestSettings(
+      tag: 'LIC-33',
+      profileId: 'yokogawa-centum-vp-pid',
+      controlledVariable: ControlledVariable.level,
+      tuningMethod: TuningMethod.integratingProcessSimc,
+      acquisition: StepAcquisition.manualIntegratingSlope,
+      integratingProcessConfirmed: true,
+    ));
+    await tester.pumpWidget(MaterialApp(home: WebPreviewHome(database: db)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('top-step-test')));
+    await tester.pumpAndSettle();
+    expect(find.text('Step Test · LIC-33'), findsOneWidget);
+    expect(find.text('Интегрирующий процесс · IPDT'), findsOneWidget);
+    expect(find.text('Ручная оценка FOPDT по ступени MV'), findsNothing);
+    db.close();
+  });
+
+  testWidgets('saved integrating CSV selection stays in CSV mode',
+      (tester) async {
+    final db = FakeStepWebDatabase(configuration: const StepTestSettings(
+      tag: 'LIC-34',
+      profileId: 'siemens-pcs7-pidconl',
+      controlledVariable: ControlledVariable.level,
+      tuningMethod: TuningMethod.integratingProcessSimc,
+      acquisition: StepAcquisition.csvIntegratingTrend,
+      integratingProcessConfirmed: true,
+    ));
+    await tester.pumpWidget(MaterialApp(home: WebPreviewHome(database: db)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('top-step-test')));
+    await tester.pumpAndSettle();
+    expect(find.text('Выбрать CSV-файл'), findsOneWidget);
+    expect(find.text('Интегрирующий процесс · IPDT'), findsNothing);
     db.close();
   });
 
