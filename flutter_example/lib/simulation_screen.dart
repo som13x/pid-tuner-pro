@@ -37,6 +37,7 @@ class _SimulationScreenState extends State<SimulationScreen> {
   String? error;
   bool busy = false;
   bool showMv = false;
+  String algorithm = 'compare';
   @override
   void initState() {
     super.initState();
@@ -81,7 +82,10 @@ class _SimulationScreenState extends State<SimulationScreen> {
     child: TextField(controller: fields[key], keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
       decoration: InputDecoration(labelText: label, border: const OutlineInputBorder(), isDense: true)));
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) {
+    final visibleResults = results == null ? null : algorithm == 'compare'
+      ? results! : results!.where((r) => r['structure'] == algorithm).toList();
+    return Scaffold(
     appBar: AppBar(title: const Text('Closed-Loop Simulation')),
     body: ListView(padding: const EdgeInsets.all(16), children: [
       const Text('Модель FOPDT и параметры PID', style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold)),
@@ -97,19 +101,37 @@ class _SimulationScreenState extends State<SimulationScreen> {
         field('manualUntil', 'MAN до, с'),
       ]),
       const SizedBox(height: 14),
+      DropdownButtonFormField<String>(
+        value: algorithm,
+        decoration: const InputDecoration(labelText: 'Структура алгоритма'),
+        items: const [
+          DropdownMenuItem(value: 'compare', child: Text('Сравнить PID / PI-D / I-PD')),
+          DropdownMenuItem(value: 'pid', child: Text('PID: P, I, D по ошибке')),
+          DropdownMenuItem(value: 'piD', child: Text('PI-D: D по PV')),
+          DropdownMenuItem(value: 'iPd', child: Text('I-PD: P и D по PV')),
+        ],
+        onChanged: busy ? null : (value) {
+          if (value != null) setState(() => algorithm = value);
+        },
+      ),
+      const SizedBox(height: 6),
+      const Text('AUTO/MAN здесь означает режим регулятора, '
+          'а не автоматический выбор алгоритма CENTUM VP. '
+          'Структуры являются приближёнными математическими моделями.'),
+      const SizedBox(height: 14),
       FilledButton.icon(onPressed: busy ? null : run,
-        icon: const Icon(Icons.play_arrow), label: const Text('Рассчитать PID / PI-D / I-PD')),
+        icon: const Icon(Icons.play_arrow), label: const Text('Рассчитать выбранную структуру')),
       if (busy) const LinearProgressIndicator(),
       if (error != null) Padding(padding: const EdgeInsets.all(8),
         child: Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
-      if (results != null) ...[
+      if (visibleResults != null) ...[
         const SizedBox(height: 20),
         const Text('Сравнение структур', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
         SingleChildScrollView(scrollDirection: Axis.horizontal, child: DataTable(columns: const [
           DataColumn(label: Text('Структура')), DataColumn(label: Text('IAE')),
           DataColumn(label: Text('Макс. |e|')), DataColumn(label: Text('Ход MV')),
           DataColumn(label: Text('Ошибка в конце')),
-        ], rows: results!.map((r) => DataRow(cells: [
+        ], rows: visibleResults.map((r) => DataRow(cells: [
           DataCell(Text('${r['structure']}')), DataCell(Text((r['iae'] as double).toStringAsFixed(1))),
           DataCell(Text((r['maxError'] as double).toStringAsFixed(2))),
           DataCell(Text((r['travel'] as double).toStringAsFixed(1))),
@@ -118,13 +140,14 @@ class _SimulationScreenState extends State<SimulationScreen> {
         SwitchListTile(title: Text(showMv ? 'График MV' : 'График PV / SP'),
           value: showMv, onChanged: (v) => setState(() => showMv = v)),
         SizedBox(height: 320, child: Card(child: Padding(padding: const EdgeInsets.all(12),
-          child: CustomPaint(painter: _SimulationPainter(results!, showMv))))),
+          child: CustomPaint(painter: _SimulationPainter(visibleResults, showMv))))),
         const SizedBox(height: 10),
         const Text('Сигналы нормированы в % шкалы. Возмущение добавляется к PV. '
           'Расчёт является приближённой моделью, не эмулятором PID-блоков Yokogawa, Siemens или ABB.'),
       ],
     ]),
   );
+  }
 }
 
 class _SimulationPainter extends CustomPainter {
