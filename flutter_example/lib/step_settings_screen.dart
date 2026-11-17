@@ -171,7 +171,8 @@ class _StepSettingsScreenState extends State<StepSettingsScreen> {
         ],
         const SizedBox(height: 16),
         DropdownButtonFormField<TuningMethod>(
-          key: const Key('settings-tuning-method'),
+          key: ValueKey('settings-tuning-method-' +
+            variable.name + '-' + tuningMethod.name),
           initialValue: tuningMethod,
           isExpanded: true,
           decoration: inputDecoration('6. Выбранный метод расчёта PI'),
