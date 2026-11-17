@@ -160,10 +160,42 @@ class DcsProfiles {
         'weighting beta, selected PI/PID type, tracking and direction.',
   );
 
+  /// Representative profiles for the two additional requested DCS families.
+  /// The exact vendor block/algorithm must be verified before field use.
+  static const honeywellExperionPid = DcsControllerProfile(
+    id: 'honeywell-experion-pks-pid',
+    vendor: 'Honeywell',
+    system: 'Experion PKS',
+    block: 'PID',
+    proportionalLabel: 'Kc (normalized equivalent)',
+    proportionalParameter: ProportionalParameter.dimensionlessGain,
+    documentationUrl: 'https://process.honeywell.com/',
+    warning: 'Honeywell Experion PID variants have controller-dependent '
+      'equations, engineering-unit scaling, and tuning parameterization. '
+      'The displayed Kc is a normalized ideal-PI equivalent only, '
+      'NOT an automatically transferable block parameter.',
+  );
+
+  static const emersonDeltaVPid = DcsControllerProfile(
+    id: 'emerson-deltav-pid',
+    vendor: 'Emerson',
+    system: 'DeltaV',
+    block: 'PID',
+    proportionalLabel: 'GAIN (normalized equivalent)',
+    proportionalParameter: ProportionalParameter.dimensionlessGain,
+    documentationUrl: 'https://www.emerson.com/',
+    warning: 'DeltaV PID forms, gain units and reset parameterization '
+      'depend on selected block options and scaling. The displayed '
+      'GAIN is a normalized ideal-PI equivalent only, not validated '
+      'for direct deployment.',
+  );
+
   static const all = [
     yokogawaCentumVp,
-    siemensPcs7Pidconl,
     abb800xaPidcc,
+    siemensPcs7Pidconl,
+    honeywellExperionPid,
+    emersonDeltaVPid,
   ];
 
   static DcsControllerProfile byId(String id) {
