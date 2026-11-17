@@ -26,12 +26,33 @@ class PidTunerWebPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'PID Tuner Pro · Step Test',
+    title: 'PID Tuner Pro',
     debugShowCheckedModeBanner: false,
     theme: ThemeData(
       useMaterial3: true,
-      colorSchemeSeed: Colors.teal,
-      brightness: Brightness.light,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: const Color(0xFF176C80),
+        brightness: Brightness.light,
+      ),
+      scaffoldBackgroundColor: const Color(0xFFF5F7FA),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Color(0xFFF5F7FA),
+        centerTitle: false,
+      ),
+      cardTheme: CardThemeData(
+        elevation: 0,
+        color: Colors.white,
+        margin: const EdgeInsets.symmetric(vertical: 6),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: Color(0xFFE1E7ED)),
+        ),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: Colors.white,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      ),
     ),
     home: WebPreviewHome(database: database),
   );
@@ -116,7 +137,8 @@ class _WebPreviewHomeState extends State<WebPreviewHome> {
     }
     return Scaffold(
       appBar: AppBar(
-        title: const Text('PID Tuner Pro'),
+        title: const Text('PID Tuner Pro',
+          style: TextStyle(fontWeight: FontWeight.w700)),
         backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
       ),
       body: SafeArea(child: Column(children: [
@@ -125,14 +147,14 @@ class _WebPreviewHomeState extends State<WebPreviewHome> {
           child: Row(children: [
             Expanded(child: ChoiceChip(
               key: const Key('top-settings'),
-              label: const Center(child: Text('1. Settings')),
+              label: const Center(child: Text('Settings', maxLines: 1)),
               selected: selectedTab == 0,
               onSelected: (_) => setState(() => selectedTab = 0),
             )),
             const SizedBox(width: 12),
             Expanded(child: ChoiceChip(
               key: const Key('top-step-test'),
-              label: const Center(child: Text('2. Step Test')),
+              label: const Center(child: Text('Step Test', maxLines: 1)),
               selected: selectedTab == 1,
               onSelected: settings == null ? null
                 : (_) => setState(() => selectedTab = 1),
@@ -140,7 +162,7 @@ class _WebPreviewHomeState extends State<WebPreviewHome> {
             const SizedBox(width: 6),
             Expanded(child: ChoiceChip(
               key: const Key('top-tuning-calculation'),
-              label: const Center(child: Text('3. Tuning', maxLines: 1)),
+              label: const Center(child: Text('Tuning', maxLines: 1)),
               selected: selectedTab == 2,
               onSelected: settings == null ? null
                 : (_) => setState(() => selectedTab = 2),
@@ -486,11 +508,14 @@ class _WebStepTestState extends State<WebStepTest> {
         Text('Step Test · ' + settings.tag,
           style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 8),
+        Text('Сохранено испытаний: ${widget.results.where((r) => (r['settings'] as Map?)?['tag'] == settings.tag).length}',
+          style: Theme.of(context).textTheme.bodyMedium),
+        const SizedBox(height: 8),
         OutlinedButton.icon(
           key: const Key('add-step-test'),
           onPressed: widget.onNewStepTest,
           icon: const Icon(Icons.add),
-          label: const Text('+ Add Step Test (новый замер)'),
+          label: const Text('Add Step Test'),
         ),
         const SizedBox(height: 8),
         Text(settings.profile.vendor + ' · ' + settings.profile.system +
