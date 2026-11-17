@@ -34,7 +34,10 @@ jobs:
           from pathlib import Path
           build_file = Path('android/app/build.gradle.kts')
           text = build_file.read_text()
-          text = text.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 36')
+          import re
+          text, count = re.subn(r'(?m)^(\s*compileSdk\s*=\s*).+$', r'\g<1>36', text)
+          if count != 1:
+              raise SystemExit(f'Expected one compileSdk setting, found {count}')
           build_file.write_text(text)
           PYTHON
       - name: App dependencies and tests
