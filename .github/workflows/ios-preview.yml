@@ -1,0 +1,151 @@
+name: iOS build and simulator smoke test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/v3.0-ios-testflight-foundation
+    paths:
+      - '.github/workflows/ios-preview.yml'
+      - 'scripts/bootstrap_ios.sh'
+      - 'flutter_example/**'
+      - 'lib/**'
+      - 'test/**'
+      - 'pubspec.yaml'
+  pull_request:
+    paths:
+      - '.github/workflows/ios-preview.yml'
+      - 'scripts/bootstrap_ios.sh'
+      - 'flutter_example/**'
+      - 'lib/**'
+      - 'test/**'
+      - 'pubspec.yaml'
+
+permissions:
+  contents: write
+
+jobs:
+  ios-preview:
+    name: iOS CI (no Apple signing)
+    runs-on: macos-15
+    timeout-minutes: 55
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: macOS / Flutter / Xcode diagnostics
+        run: |
+          sw_vers
+          xcodebuild -version
+          flutter --version
+          xcrun simctl list devices available
+
+      - name: Create and configure iOS Runner
+        run: bash scripts/bootstrap_ios.sh
+
+      # The first trusted branch push adds generated standard Flutter Runner
+      # files, so a Mac clone can open ios/Runner.xcworkspace.
+      # PR builds never write to their source branches.
+      - name: Preserve generated iOS project in feature branch
+        if: github.event_name == 'push' && github.ref == 'refs/heads/feature/v3.0-ios-testflight-foundation'
+        run: |
+          git add -- flutter_example/ios
+          if ! git diff --cached --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "chore(ios): check in generated Flutter iOS Runner project"
+            git push origin "HEAD:$GITHUB_REF_NAME"
+          else
+            echo "iOS Runner is already tracked."
+          fi
+
+      - name: Verify Dart core
+        run: |
+          dart pub get
+          dart test
+          dart analyze lib test
+
+      - name: Verify Flutter app on macOS runner
+        working-directory: flutter_example
+        run: |
+          flutter pub get
+          flutter test
+          flutter analyze --no-fatal-infos
+
+      - name: Build unsigned iOS Simulator app
+        working-directory: flutter_example
+        run: flutter build ios --simulator --debug --no-codesign
+
+      - name: Launch on an available iPhone simulator
+        id: simulator
+        working-directory: flutter_example
+        shell: bash
+        run: |
+          set -euo pipefail
+          sim_id="$(xcrun simctl list devices available --json | python3 -c '
+          import json,sys
+          groups=json.load(sys.stdin).get("devices", {})
+          devices=[d for group in groups.values() for d in group
+                   if d.get("isAvailable") and
+                      d.get("name","").startswith("iPhone")]
+          print(devices[0].get("udid", "") if devices else "")
+          ')"
+          if [[ -z "$sim_id" ]]; then
+            echo "No compatible iPhone simulator runtime; launch skipped."
+            exit 0
+          fi
+          echo "Selected iPhone simulator: $sim_id"
+          xcrun simctl boot "$sim_id" 2>/dev/null || true
+          xcrun simctl bootstatus "$sim_id" -b
+          xcrun simctl install "$sim_id" build/ios/iphonesimulator/Runner.app
+          xcrun simctl launch "$sim_id" com.som13x.pidtunerpro
+          sleep 5
+          mkdir -p build/ios/iphone-preview
+          xcrun simctl io "$sim_id" screenshot \
+            build/ios/iphone-preview/launch.png
+
+      - name: Build unsigned physical-iPhone archive
+        working-directory: flutter_example
+        run: flutter build ios --release --no-codesign
+
+      - name: Package simulator and unsigned device results
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          ditto -c -k --sequesterRsrc --keepParent \
+            flutter_example/build/ios/iphonesimulator/Runner.app \
+            dist/pid-tuner-pro-ios-simulator-app.zip
+          ditto -c -k --sequesterRsrc --keepParent \
+            flutter_example/build/ios/iphoneos/Runner.app \
+            dist/pid-tuner-pro-ios-unsigned-device-app.zip
+          if [[ -f flutter_example/build/ios/iphone-preview/launch.png ]]; then
+            cp flutter_example/build/ios/iphone-preview/launch.png \
+              dist/ios-simulator-launch.png
+          fi
+          shasum -a 256 dist/*.zip > dist/SHA256SUMS
+          {
+            echo "## iOS preview"
+            echo "- iOS Simulator build: successful"
+            echo "- Unsigned device archive: successful, **not installable on iPhone**"
+            if [[ -f dist/ios-simulator-launch.png ]]; then
+              echo "- Simulator smoke launch: screenshot generated"
+            else
+              echo "- Simulator smoke launch: skipped (no device available)"
+            fi
+            echo "- TestFlight / signed IPA: **not produced** (requires Apple Developer signing)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload iOS testing artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pid-tuner-pro-ios-v3-preview-unsigned
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 90
