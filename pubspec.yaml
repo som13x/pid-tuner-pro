@@ -1,0 +1,7 @@
+name: pid_tuner_pro_core
+description: Offline FOPDT PI tuning prototype for PID Tuner Pro
+version: 0.1.0
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+dev_dependencies:
+  test: ^1.25.0

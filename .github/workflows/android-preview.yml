@@ -1,0 +1,54 @@
+name: Android APK and verification
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Flutter and Dart versions
+        run: flutter --version && dart --version
+      - name: Core dependencies and tests
+        run: |
+          dart pub get
+          dart test
+      - name: Create Android host project
+        working-directory: flutter_example
+        run: flutter create --platforms=android --project-name pid_tuner_pro_demo .
+      - name: App dependencies and tests
+        working-directory: flutter_example
+        run: |
+          flutter pub get
+          flutter test
+      - name: Analyze Flutter application
+        working-directory: flutter_example
+        run: flutter analyze --no-fatal-infos
+      - name: Build debug APK
+        working-directory: flutter_example
+        run: flutter build apk --debug
+      - name: Upload installable debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: pid-tuner-pro-android-debug
+          path: flutter_example/build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 90
+      - name: Upload generated Android host files
+        uses: actions/upload-artifact@v4
+        with:
+          name: pid-tuner-pro-android-host
+          path: flutter_example/android/**
+          if-no-files-found: error
+          retention-days: 90

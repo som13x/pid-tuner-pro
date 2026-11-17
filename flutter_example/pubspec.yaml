@@ -1,0 +1,21 @@
+name: pid_tuner_pro_demo
+description: Flutter demo using PID Tuner Pro core
+publish_to: none
+version: 0.1.0+1
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  file_picker: ^8.1.7
+  drift: ^2.22.1
+  sqlite3_flutter_libs: ^0.5.26
+  path: ^1.9.0
+  path_provider: ^2.1.5
+  pid_tuner_pro_core:
+    path: ..
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+flutter:
+  uses-material-design: true
