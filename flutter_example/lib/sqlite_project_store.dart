@@ -7,8 +7,14 @@ import 'model_management.dart';
 
 /// Drift-backed repository. Tables are defined with SQL to avoid generated files.
 /// All writes occur in a single SQLite transaction.
-class PidDatabase extends DatabaseConnectionUser {
-  PidDatabase(super.connection);
+class PidDatabase extends GeneratedDatabase {
+  PidDatabase(DatabaseConnection connection) : super.connect(connection);
+
+  @override
+  int get schemaVersion => 1;
+
+  @override
+  Iterable<TableInfo> get allTables => const [];
 
   static Future<PidDatabase> open(File file) async {
     await file.parent.create(recursive: true);
@@ -162,5 +168,6 @@ class PidDatabase extends DatabaseConnectionUser {
     return true;
   }
 
-  Future<void> close() async => await connection.executor.close();
+  @override
+  Future<void> close() => super.close();
 }
