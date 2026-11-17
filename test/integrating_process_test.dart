@@ -148,6 +148,16 @@ void main() {
       throwsArgumentError);
   });
 
+  test('integrating detector rejects settling first-order response', () {
+    final samples = List.generate(121, (i) {
+      final t = i.toDouble();
+      return TrendPoint(t, t < 20 ? 40 : 50,
+        10 + (t <= 24 ? 0 : 12 * (1 - math.exp(-(t - 24) / 12))));
+    });
+    expect(() => const IntegratingStepIdentifier().identify(samples),
+      throwsArgumentError);
+  });
+
   test('no FOPDT property is invented in IPDT model evidence', () {
     const model = IntegratingPlant(gainPerSecond: .05, delaySeconds: 4);
     model.validate();
