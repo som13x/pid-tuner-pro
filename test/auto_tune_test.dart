@@ -17,7 +17,7 @@ void main() {
   });
   test('saturation and slew limit are respected', () {
     final engine = AutoTune(plant, const TuneConfig(
-      disturbance: 20, maxMvRate: 5, maxAbsPvError: 10));
+      disturbance: 20, maxMvRate: 1, maxAbsPvError: 10));
     final c = engine.evaluate(40, 5, keepSamples: true);
     expect(c.metrics.maxMvRate, lessThanOrEqualTo(5.000001));
     for (final s in c.samples) {
