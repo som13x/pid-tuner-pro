@@ -251,6 +251,23 @@ class IntegratingStepIdentifier {
         bestL = l;
       }
     }
+    // A self-regulating step response that has flattened out must NOT
+    // be interpreted as an integrating ramp just because a line fits
+    // part of the trend. Compare drift-compensated late-time slopes.
+    double responseSlope(int first, int last) {
+      final p0 = post[first], p1 = post[last];
+      return (p1.pv - p0.pv) / (p1.seconds - p0.seconds) -
+        baselineSlope;
+    }
+    final middleSlope = responseSlope(
+      post.length ~/ 2, post.length * 3 ~/ 4);
+    final finalSlope = responseSlope(
+      post.length * 3 ~/ 4, post.length - 1);
+    if (middleSlope.abs() > 1e-4 &&
+        finalSlope.abs() < middleSlope.abs() * .25) {
+      throw ArgumentError('PV response levels off; model may be FOPDT '
+        'rather than an integrating IPDT process');
+    }
     final plant = IntegratingPlant(
       gainPerSecond: bestKi,
       delaySeconds: bestL,
