@@ -24,22 +24,6 @@ jobs:
         run: |
           dart pub get
           dart test
-      - name: Create Android host project
-        working-directory: flutter_example
-        run: flutter create --platforms=android --project-name pid_tuner_pro_demo .
-      - name: Set Android compile SDK
-        working-directory: flutter_example
-        run: |
-          python3 - <<'PYTHON'
-          from pathlib import Path
-          build_file = Path('android/app/build.gradle.kts')
-          text = build_file.read_text()
-          import re
-          text, count = re.subn(r'(?m)^(\s*compileSdk\s*=\s*).+$', r'\g<1>36', text)
-          if count != 1:
-              raise SystemExit(f'Expected one compileSdk setting, found {count}')
-          build_file.write_text(text)
-          PYTHON
       - name: App dependencies and tests
         working-directory: flutter_example
         run: |
@@ -50,18 +34,11 @@ jobs:
         run: flutter analyze --no-fatal-infos
       - name: Build debug APK
         working-directory: flutter_example
-        run: flutter build apk --debug
+        run: flutter build apk --debug --split-per-abi
       - name: Upload installable debug APK
         uses: actions/upload-artifact@v4
         with:
           name: pid-tuner-pro-android-debug
-          path: flutter_example/build/app/outputs/flutter-apk/app-debug.apk
-          if-no-files-found: error
-          retention-days: 90
-      - name: Upload generated Android host files
-        uses: actions/upload-artifact@v4
-        with:
-          name: pid-tuner-pro-android-host
-          path: flutter_example/android/**
+          path: flutter_example/build/app/outputs/flutter-apk/*.apk
           if-no-files-found: error
           retention-days: 90
