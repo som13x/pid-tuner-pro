@@ -27,6 +27,16 @@ jobs:
       - name: Create Android host project
         working-directory: flutter_example
         run: flutter create --platforms=android --project-name pid_tuner_pro_demo .
+      - name: Set Android compile SDK
+        working-directory: flutter_example
+        run: |
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          build_file = Path('android/app/build.gradle.kts')
+          text = build_file.read_text()
+          text = text.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 36')
+          build_file.write_text(text)
+          PYTHON
       - name: App dependencies and tests
         working-directory: flutter_example
         run: |
