@@ -22,23 +22,34 @@ class IntegratingPlant {
   }
 }
 
-/// Direct measurements of the post-step ramp and (optionally nonzero)
-/// pre-step PV slope, all in engineering units and seconds.
+/// OptiControls manual integration rate identification using FOUR PV points.
+///
+/// Time is measured in seconds RELATIVE to the MV step (t = 0).
+/// PV1 at t1 and PV2 at t2 lie on slope 1 before the step.
+/// PV3 at t3 and PV4 at t4 lie on slope 2 after effective dead time.
+///
+/// T1 = t2 - t1, T2 = t4 - t3, with both intervals positive.
+/// DS = (PV4-PV3)/T2 - (PV2-PV1)/T1.
+/// ri = [100 * DS / PV span] / [100 * (MV1-MV0) / MV span].
 class IntegratingManualInput {
-  final double mvBefore, mvAfter, pvAtT1, pvAtT2;
-  final double t1Seconds, t2Seconds, delaySeconds;
-  final double baselineSlopePerSecond;
+  final double mvBefore, mvAfter;
+  final double pv1, pv2, pv3, pv4;
+  final double t1Seconds, t2Seconds, t3Seconds, t4Seconds;
+  final double delaySeconds;
   final double mvSpanLow, mvSpanHigh, pvSpanLow, pvSpanHigh;
 
   const IntegratingManualInput({
     required this.mvBefore,
     required this.mvAfter,
-    required this.pvAtT1,
-    required this.pvAtT2,
+    required this.pv1,
+    required this.pv2,
+    required this.pv3,
+    required this.pv4,
     required this.t1Seconds,
     required this.t2Seconds,
+    required this.t3Seconds,
+    required this.t4Seconds,
     required this.delaySeconds,
-    this.baselineSlopePerSecond = 0,
     required this.mvSpanLow,
     required this.mvSpanHigh,
     required this.pvSpanLow,
@@ -51,6 +62,7 @@ class IntegratingManualEstimate {
   final IntegratingManualInput input;
   final double beforeSlopeNormalized;
   final double afterSlopeNormalized;
+  final double deltaSlopeNormalized;
   final double deltaMvNormalized;
 
   const IntegratingManualEstimate({
@@ -58,21 +70,34 @@ class IntegratingManualEstimate {
     required this.input,
     required this.beforeSlopeNormalized,
     required this.afterSlopeNormalized,
+    required this.deltaSlopeNormalized,
     required this.deltaMvNormalized,
   });
 
+  double get t1Interval => input.t2Seconds - input.t1Seconds;
+  double get t2Interval => input.t4Seconds - input.t3Seconds;
+
+  /// Evidence is stored with the Settings snapshot in IndexedDB; historical
+  /// two-point + entered-baseline records are not rewritten.
   Map<String, Object?> get evidence => {
-    'method': 'manualIntegratingRamp',
+    'method': 'opticontrolsManualFourPoints',
+    'formula': 'DS=(PV4-PV3)/(t4-t3)-(PV2-PV1)/(t2-t1)',
     'mvBefore': input.mvBefore,
     'mvAfter': input.mvAfter,
-    'pvAtT1': input.pvAtT1,
-    'pvAtT2': input.pvAtT2,
+    'pv1': input.pv1,
+    'pv2': input.pv2,
+    'pv3': input.pv3,
+    'pv4': input.pv4,
     't1Seconds': input.t1Seconds,
     't2Seconds': input.t2Seconds,
+    't3Seconds': input.t3Seconds,
+    't4Seconds': input.t4Seconds,
+    'T1Seconds': t1Interval,
+    'T2Seconds': t2Interval,
     'delaySeconds': input.delaySeconds,
-    'baselineSlopePerSecond': input.baselineSlopePerSecond,
     'baselineSlopeNormalized': beforeSlopeNormalized,
     'afterSlopeNormalized': afterSlopeNormalized,
+    'deltaSlopeNormalized': deltaSlopeNormalized,
     'deltaMvNormalized': deltaMvNormalized,
     'mvSpanLow': input.mvSpanLow,
     'mvSpanHigh': input.mvSpanHigh,
@@ -87,46 +112,64 @@ class IntegratingManualEstimator {
   const IntegratingManualEstimator();
 
   IntegratingManualEstimate estimate(IntegratingManualInput x) {
-    final vals = [
-      x.mvBefore, x.mvAfter, x.pvAtT1, x.pvAtT2,
-      x.t1Seconds, x.t2Seconds, x.delaySeconds,
-      x.baselineSlopePerSecond,
+    final values = [
+      x.mvBefore, x.mvAfter,
+      x.pv1, x.pv2, x.pv3, x.pv4,
+      x.t1Seconds, x.t2Seconds, x.t3Seconds, x.t4Seconds,
+      x.delaySeconds,
       x.mvSpanLow, x.mvSpanHigh, x.pvSpanLow, x.pvSpanHigh,
     ];
-    if (vals.any((v) => !v.isFinite) ||
-        x.mvSpanHigh <= x.mvSpanLow ||
-        x.pvSpanHigh <= x.pvSpanLow ||
-        x.mvBefore < x.mvSpanLow || x.mvBefore > x.mvSpanHigh ||
+    if (values.any((v) => !v.isFinite)) {
+      throw ArgumentError('Все измерения и границы шкал должны быть числами');
+    }
+    if (x.mvSpanHigh <= x.mvSpanLow || x.pvSpanHigh <= x.pvSpanLow) {
+      throw ArgumentError('Верхняя граница шкалы должна быть больше нижней');
+    }
+    if (x.mvBefore < x.mvSpanLow || x.mvBefore > x.mvSpanHigh ||
         x.mvAfter < x.mvSpanLow || x.mvAfter > x.mvSpanHigh ||
-        x.pvAtT1 < x.pvSpanLow || x.pvAtT1 > x.pvSpanHigh ||
-        x.pvAtT2 < x.pvSpanLow || x.pvAtT2 > x.pvSpanHigh ||
-        x.delaySeconds < 0 || x.t1Seconds <= x.delaySeconds ||
-        x.t2Seconds <= x.t1Seconds) {
-      throw ArgumentError('Invalid IPDT step measurements or response times');
+        [x.pv1, x.pv2, x.pv3, x.pv4].any(
+          (pv) => pv < x.pvSpanLow || pv > x.pvSpanHigh)) {
+      throw ArgumentError('PV или MV выходит за указанную шкалу');
     }
-    final deltaMvPct = 100 * (x.mvAfter - x.mvBefore) /
+    // t=0 is the MV step. Both pre-step points belong to Slope 1.
+    // Both post-step points belong to Slope 2, after the dead time.
+    if (!(x.t1Seconds < x.t2Seconds &&
+          x.t2Seconds <= 0 &&
+          x.delaySeconds >= 0 &&
+          x.t3Seconds > x.delaySeconds &&
+          x.t4Seconds > x.t3Seconds)) {
+      throw ArgumentError(
+        'Время отсчитывается от ступени MV (t=0): '
+        't1 < t2 ≤ 0, затем t3 > L и t4 > t3. '
+        'Все времена должны быть в секундах.');
+    }
+    final deltaMvPercent = 100 * (x.mvAfter - x.mvBefore) /
         (x.mvSpanHigh - x.mvSpanLow);
-    if (deltaMvPct.abs() < 2) {
-      throw ArgumentError('MV step must be at least 2% of its span');
+    if (deltaMvPercent.abs() < 2) {
+      throw ArgumentError('Ступень MV должна быть не меньше 2% шкалы');
     }
+    final t1Interval = x.t2Seconds - x.t1Seconds;
+    final t2Interval = x.t4Seconds - x.t3Seconds;
+    final beforeSlopeEu = (x.pv2 - x.pv1) / t1Interval;
+    final afterSlopeEu = (x.pv4 - x.pv3) / t2Interval;
     final pvSpan = x.pvSpanHigh - x.pvSpanLow;
-    final postSlopePct = 100 * (x.pvAtT2 - x.pvAtT1) /
-        (pvSpan * (x.t2Seconds - x.t1Seconds));
-    final baseSlopePct = 100 * x.baselineSlopePerSecond / pvSpan;
-    final changeSlopePct = postSlopePct - baseSlopePct;
-    if (changeSlopePct.abs() < 1e-10) {
-      throw ArgumentError('PV ramp slope change is too small');
+    final beforeSlope = 100 * beforeSlopeEu / pvSpan;
+    final afterSlope = 100 * afterSlopeEu / pvSpan;
+    final deltaSlope = afterSlope - beforeSlope;
+    if (deltaSlope.abs() < 1e-10) {
+      throw ArgumentError('Изменение наклона PV слишком мало');
     }
     final plant = IntegratingPlant(
-      gainPerSecond: changeSlopePct / deltaMvPct,
+      gainPerSecond: deltaSlope / deltaMvPercent,
       delaySeconds: x.delaySeconds,
     );
     plant.validate();
     return IntegratingManualEstimate(
       plant: plant, input: x,
-      beforeSlopeNormalized: baseSlopePct,
-      afterSlopeNormalized: postSlopePct,
-      deltaMvNormalized: deltaMvPct,
+      beforeSlopeNormalized: beforeSlope,
+      afterSlopeNormalized: afterSlope,
+      deltaSlopeNormalized: deltaSlope,
+      deltaMvNormalized: deltaMvPercent,
     );
   }
 }
