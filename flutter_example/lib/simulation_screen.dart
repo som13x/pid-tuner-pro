@@ -12,7 +12,8 @@ List<Map<String, dynamic>> _simulateWorker(Map<String, double> p) {
   final config = CentumPidConfig(pb: p['pb']!, ti: p['ti']!, td: p['td']!,
     dt: 0.2, maxMvRate: p['rate']!,
     pvFilterSeconds: p['pvFilter']!,
-    derivativeFilterSeconds: p['dFilter']!);
+    derivativeFilterSeconds: p['dFilter']!,
+    action: p['action']! > 0 ? ControllerAction.reverse : ControllerAction.direct);
   final scenario = LoopScenario(duration: p['duration']!, dt: 0.2,
     disturbanceAt: p['disturbanceAt']!, disturbanceMagnitude: p['disturbance']!,
     manualUntil: p['manualUntil']!, manualMv: 50);
@@ -41,6 +42,7 @@ class _SimulationScreenState extends State<SimulationScreen> {
   bool showMv = false;
   bool showFilteredPv = false;
   String algorithm = 'compare';
+  String actionSelection = 'auto';
   @override
   void initState() {
     super.initState();
@@ -73,6 +75,11 @@ class _SimulationScreenState extends State<SimulationScreen> {
         inputs['disturbanceAt']! < 0 || inputs['tau']! < 0.4) {
       setState(() => error = 'Проверьте диапазоны: T ≥ 0.4 с, время 1–1800 с, PB/Ti > 0; PV фильтр ≥ 0, D фильтр > 0'); return;
     }
+    // Automatic direction is only a default for the synthetic process model.
+    // Final action requires verification against physical valve action.
+    inputs['action'] = actionSelection == 'auto'
+      ? (inputs['k']! > 0 ? 1.0 : -1.0)
+      : (actionSelection == 'reverse' ? 1.0 : -1.0);
     setState(() { busy = true; error = null; results = null; });
     try {
       final r = await compute(_simulateWorker, inputs);
@@ -112,6 +119,19 @@ class _SimulationScreenState extends State<SimulationScreen> {
           'Уменьшает шум, но добавляет запаздывание и может ухудшить регулирование. '
           'Нулевое значение отключает фильтрацию.'),
       const SizedBox(height: 14),
+      DropdownButtonFormField<String>(
+        value: actionSelection,
+        decoration: const InputDecoration(labelText: 'Направление действия регулятора'),
+        items: const [
+          DropdownMenuItem(value: 'auto', child: Text('По знаку K (проверить на объекте)')),
+          DropdownMenuItem(value: 'reverse', child: Text('Reverse action')),
+          DropdownMenuItem(value: 'direct', child: Text('Direct action')),
+        ],
+        onChanged: busy ? null : (value) {
+          if (value != null) setState(() => actionSelection = value);
+        },
+      ),
+      const SizedBox(height: 12),
       DropdownButtonFormField<String>(
         value: algorithm,
         decoration: const InputDecoration(labelText: 'Структура алгоритма'),
