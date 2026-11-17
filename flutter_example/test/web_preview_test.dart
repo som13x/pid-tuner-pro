@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:idb_shim/idb_shim.dart';
 import 'package:pid_tuner_pro_core/dcs_controller_profiles.dart';
 import 'package:pid_tuner_pro_core/step_test_settings.dart';
-import 'package:pid_tuner_pro_demo/step_web_database.dart';
+import 'fake_step_web_database.dart';
 import 'package:pid_tuner_pro_demo/web_main.dart';
 
 void main() {
@@ -14,7 +13,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final db = StepWebDatabase(factory: newIdbFactoryMemory());
+    final db = FakeStepWebDatabase();
     await tester.pumpWidget(PidTunerWebPreview(database: db));
     await tester.pumpAndSettle();
     expect(find.text('PID Tuner Pro'), findsOneWidget);
@@ -25,11 +24,9 @@ void main() {
     db.close();
   });
 
-  testWidgets('saved Settings restore to Step Test on the same browser DB',
+  testWidgets('preloaded Settings open Step Test with selected manual method',
       (tester) async {
-    final factory = newIdbFactoryMemory();
-    final initial = StepWebDatabase(factory: factory);
-    await initial.saveSettings(const StepTestSettings(
+    final db = FakeStepWebDatabase(configuration: const StepTestSettings(
       tag: 'PIC-17',
       comments: 'Pressure test',
       profileId: 'siemens-pcs7-pidconl',
@@ -37,9 +34,6 @@ void main() {
       tuningMethod: TuningMethod.imcConservative,
       acquisition: StepAcquisition.manualDelayAndT63,
     ));
-    initial.close();
-
-    final db = StepWebDatabase(factory: factory);
     await tester.pumpWidget(PidTunerWebPreview(database: db));
     await tester.pumpAndSettle();
     expect(find.text('Settings · параметры контура'), findsOneWidget);
@@ -57,7 +51,7 @@ void main() {
 
   testWidgets('DCS selections are available in the Settings form',
       (tester) async {
-    final db = StepWebDatabase(factory: newIdbFactoryMemory());
+    final db = FakeStepWebDatabase();
     await tester.pumpWidget(PidTunerWebPreview(database: db));
     await tester.pumpAndSettle();
     final menu = tester.widget<DropdownButton<String>>(
