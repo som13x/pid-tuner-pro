@@ -8,6 +8,7 @@ dependencies:
   flutter:
     sdk: flutter
   file_picker: ^13.4.0
+  idb_shim: ^2.11.3
   drift: ^2.22.1
   sqlite3_flutter_libs: ^0.5.26
   path: ^1.9.0
