@@ -6,6 +6,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:pid_tuner_pro_core/auto_tune.dart';
+import 'package:pid_tuner_pro_core/dcs_controller_profiles.dart';
 import 'package:pid_tuner_pro_core/step_identification.dart';
 import 'package:pid_tuner_pro_core/trend_csv.dart';
 
@@ -60,9 +61,11 @@ Map<String, dynamic> _candidateToJson(Candidate c) => {
 };
 
 class AutoTuneScreen extends StatefulWidget {
-  const AutoTuneScreen({super.key, this.initialPlant, this.allowSave = false});
+  const AutoTuneScreen({super.key, this.initialPlant, this.allowSave = false,
+    this.profile});
   final bool allowSave;
   final Plant? initialPlant;
+  final DcsControllerProfile? profile;
   @override
   State<AutoTuneScreen> createState() => _AutoTuneScreenState();
 }
@@ -81,6 +84,33 @@ class _AutoTuneScreenState extends State<AutoTuneScreen> {
       final plant = identifiedPlant ?? widget.initialPlant ?? const Plant(gain: 0.8, tau: 12, delay: 3);
       final value = await compute(_runSearch, <String, dynamic>{'gain': plant.gain, 'tau': plant.tau, 'delay': plant.delay});
       if (!mounted) return;
+      // The optimizer remains normalized ideal PI. Translate only the
+      // labels and equivalent proportional coefficient. NEVER report
+      // unverified controller-specific values as ready to deploy.
+      final profile = widget.profile;
+      if (profile != null) {
+        final candidates = (value['best'] as List).cast<Map<String, dynamic>>();
+        for (final c in candidates) {
+          c['dcs'] = profile.translate(
+            pbPercent: (c['pbPercent'] as num).toDouble(),
+            tiSeconds: (c['tiSeconds'] as num).toDouble(),
+            processGain: plant.gain,
+          ).toJson();
+        }
+        final baseline = value['baseline'] as Map<String, dynamic>;
+        baseline['dcs'] = profile.translate(
+          pbPercent: (baseline['pbPercent'] as num).toDouble(),
+          tiSeconds: (baseline['tiSeconds'] as num).toDouble(),
+          processGain: plant.gain,
+        ).toJson();
+        value['dcsProfile'] = {
+          'profileId': profile.id,
+          'title': profile.title,
+          'warning': profile.warning,
+          'documentation': profile.documentationUrl,
+          'verifiedForDeployment': false,
+        };
+      }
       setState(() { report = value; selection = 0; });
     } catch (e) {
       if (!mounted) return;
@@ -98,10 +128,17 @@ class _AutoTuneScreenState extends State<AutoTuneScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Auto Tune Studio'), actions: [IconButton(tooltip: 'Stability Analysis', icon: const Icon(Icons.stacked_line_chart), onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StabilityScreen()))), IconButton(tooltip: 'Step Test', icon: const Icon(Icons.analytics_outlined), onPressed: () async { final fit = await Navigator.of(context).push<IdentificationResult>(MaterialPageRoute(builder: (_) => const StepTestScreen())); if (fit != null && mounted) setState(() { identifiedPlant = fit.plant; report = null; }); })]),
       body: ListView(padding: const EdgeInsets.all(16), children: [
-        const Text('FIC-80B · Yokogawa CENTUM VP',
-          style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold)),
+        Text(widget.profile?.title ?? 'Universal PI · no DCS profile',
+          style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
         Text(identifiedPlant != null ? 'Модель из Step Test: K=${identifiedPlant!.gain.toStringAsFixed(3)}, T=${identifiedPlant!.tau.toStringAsFixed(2)} с, L=${identifiedPlant!.delay.toStringAsFixed(2)} с. Требуется инженерная проверка.' : widget.initialPlant != null ? 'Модель выбранного контура: K=${widget.initialPlant!.gain.toStringAsFixed(3)}, T=${widget.initialPlant!.tau.toStringAsFixed(2)} с, L=${widget.initialPlant!.delay.toStringAsFixed(2)} с.' : 'Демонстрационная FOPDT-модель, не подтверждённая Step Test.'),
+        if (widget.profile != null) ...[
+          const SizedBox(height: 6),
+          const Text('Инженерный эквивалент для нормированных сигналов. '
+              'Не предназначен для прямого ввода в DCS.',
+              style: TextStyle(color: Colors.deepOrange)),
+          Text(widget.profile!.warning),
+        ],
         const SizedBox(height: 12),
         const Wrap(spacing: 10, runSpacing: 8, children: [
           Chip(label: Text('Приоритет: клапан')),
@@ -139,13 +176,17 @@ class _AutoTuneScreenState extends State<AutoTuneScreen> {
             ...List.generate(best.length, (i) {
               final c = best[i] as Map<String, dynamic>;
               final m = c['metrics'] as Map<String, dynamic>;
+              final dcs = c['dcs'] as Map<String, Object?>?;
               return RadioListTile<int>(
                 value: i, groupValue: selection,
                 onChanged: (v) => setState(() => selection = v!),
                 title: Text('PB ${(c['pbPercent'] as num).toStringAsFixed(1)}% · '
                   'Ti ${(c['tiSeconds'] as num).toStringAsFixed(1)} с'),
                 subtitle: Text('Ход MV ${(m['mvTotalVariationPercent'] as num).toStringAsFixed(2)}% · '
-                  'IAE ${(m['iae'] as num).toStringAsFixed(1)}'),
+                  'IAE ${(m['iae'] as num).toStringAsFixed(1)}' +
+                  (dcs == null ? '' : '\n' + (dcs['parameterName'] as String) + ': ' +
+                    (dcs['parameterValue'] as num).toStringAsFixed(3) +
+                    ' (идеальный нормированный PI)')),
               );
             }),
             SwitchListTile(
