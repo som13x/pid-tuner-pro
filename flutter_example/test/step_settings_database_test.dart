@@ -131,6 +131,9 @@ void main() {
         matching: find.byType(DropdownButton<String>),
       ));
     expect(vendorDropdown.items, hasLength(5));
+    await tester.drag(find.byKey(const Key('settings-form')),
+      const Offset(0, -470));
+    await tester.pumpAndSettle();
     expect(find.text('5. Рекомендуемый метод расчёта PI'), findsOneWidget);
     expect(find.text('IMC / Lambda (консервативный PI)'), findsWidgets);
     db.close();
