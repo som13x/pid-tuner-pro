@@ -24,7 +24,7 @@ jobs:
         run: |
           dart pub get
           dart test
-          flutter analyze --no-fatal-infos
+          dart analyze lib test
       - name: App dependencies, tests, and analysis
         working-directory: flutter_example
         run: |
