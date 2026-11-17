@@ -166,7 +166,7 @@ void main() {
     await tester.tap(find.byKey(const Key('top-step-test')));
     await tester.pumpAndSettle();
     expect(find.text('Step Test · LIC-33'), findsOneWidget);
-    expect(find.text('Интегрирующий процесс · IPDT'), findsOneWidget);
+    expect(find.text('OptiControls · ручной Step Test (4 точки)'), findsOneWidget);
     expect(find.text('Ручная оценка FOPDT по ступени MV'), findsNothing);
     db.close();
   });
