@@ -99,7 +99,7 @@ void main() {
     final run = ExternalTrackingLab.simulate(
       const ExternalTrackingScenario(
         plant: Plant(gain: -0.8, tau: 12, delay: 2),
-        duration: 40, spStepAt: 15),
+        duration: 40, spStepAt: 15, rlStepAt: 20),
       externalTracking: false);
     final before = run.points.firstWhere((p) => p.seconds >= 10).requestedMv;
     final after = run.points.firstWhere((p) => p.seconds >= 16).requestedMv;
