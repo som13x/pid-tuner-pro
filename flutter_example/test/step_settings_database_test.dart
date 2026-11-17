@@ -113,10 +113,11 @@ void main() {
       tag: 'LIC-50',
       profileId: 'yokogawa-centum-vp-pid',
       controlledVariable: ControlledVariable.level,
-      tuningMethod: TuningMethod.integratingProcessSimc,
+      tuningMethod: TuningMethod.opticontrolsLevel,
       acquisition: StepAcquisition.manualIntegratingSlope,
       integratingProcessConfirmed: true,
-      lambdaSeconds: 30,
+      stabilityMargin: 3,
+      levelControlMode: LevelControlMode.pid,
     );
     await db.saveSettings(ipdt);
     final pi = const StepPiCalculator().calculateIntegrating(
@@ -132,7 +133,7 @@ void main() {
     final reopened = StepWebDatabase(factory: factory);
     final storedSettings = await reopened.loadSettings();
     expect(storedSettings!.tuningMethod,
-      TuningMethod.integratingProcessSimc);
+      TuningMethod.opticontrolsLevel);
     final rows = await reopened.getResults();
     expect(rows, hasLength(1));
     final model = rows.single['model'] as Map;
@@ -142,8 +143,11 @@ void main() {
     expect(model.containsKey('T'), false);
     expect((rows.single['evidence'] as Map)['method'],
       'manualIntegratingRamp');
-    expect((rows.single['settings'] as Map)['lambdaSeconds'], 30);
-    expect((rows.single['piEstimate'] as Map)['tiSeconds'], 140);
+    expect((rows.single['settings'] as Map)['stabilityMargin'], 3);
+    expect((rows.single['settings'] as Map)['levelControlMode'], 'pid');
+    expect((rows.single['piEstimate'] as Map)['tiSeconds'], 30);
+    expect((rows.single['piEstimate'] as Map)['tdSeconds'], 2.5);
+    expect((rows.single['piEstimate'] as Map)['method'], 'opticontrolsLevel');
     reopened.close();
   });
 
@@ -153,7 +157,7 @@ void main() {
       tag: 'LIC-33',
       profileId: 'yokogawa-centum-vp-pid',
       controlledVariable: ControlledVariable.level,
-      tuningMethod: TuningMethod.integratingProcessSimc,
+      tuningMethod: TuningMethod.opticontrolsLevel,
       acquisition: StepAcquisition.manualIntegratingSlope,
       integratingProcessConfirmed: true,
     ));
@@ -173,7 +177,7 @@ void main() {
       tag: 'LIC-34',
       profileId: 'siemens-pcs7-pidconl',
       controlledVariable: ControlledVariable.level,
-      tuningMethod: TuningMethod.integratingProcessSimc,
+      tuningMethod: TuningMethod.opticontrolsLevel,
       acquisition: StepAcquisition.csvIntegratingTrend,
       integratingProcessConfirmed: true,
     ));
