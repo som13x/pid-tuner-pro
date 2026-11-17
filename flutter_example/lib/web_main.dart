@@ -1,22 +1,15 @@
 import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:pid_tuner_pro_core/auto_tune.dart';
 import 'package:pid_tuner_pro_core/step_identification.dart';
 import 'package:pid_tuner_pro_core/trend_csv.dart';
 
-import 'circuit_studio_screen.dart';
-import 'dual_valve_screen.dart';
 import 'manual_step_form.dart';
-import 'rl_tracking_screen.dart';
-import 'simulation_screen.dart';
-import 'stability_screen.dart';
 
-/// Safari / Flutter Web entry point. Core solvers and existing pure Flutter
-/// lab screens are reused. Native SQLite / dart:io screens are deliberately
-/// excluded until a real web persistence and backup adapter is implemented.
+/// Safari / Flutter Web Step Test only. Native SQLite / dart:io screens
+/// are intentionally excluded; no persistent browser projects are claimed.
 void main() => runApp(const PidTunerWebPreview());
 
 class PidTunerWebPreview extends StatelessWidget {
@@ -24,7 +17,7 @@ class PidTunerWebPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'PID Tuner Pro · Safari Preview',
+    title: 'PID Tuner Pro · Step Test',
     debugShowCheckedModeBanner: false,
     theme: ThemeData(
       useMaterial3: true,
@@ -43,57 +36,26 @@ class WebPreviewHome extends StatefulWidget {
 }
 
 class _WebPreviewHomeState extends State<WebPreviewHome> {
-  int selected = 0;
   Plant? currentModel;
   String? source;
-  Map<String, dynamic>? circuit;
-  static const labels = [
-    'Step Test', 'Auto Tune', 'Simulation', 'Circuit Studio',
-    'Stability', 'RL Tracking', 'Dual Valve LNG',
-  ];
 
   void useModel(Plant plant, String origin) {
     setState(() {
       currentModel = plant;
       source = origin;
     });
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('Модель K/T/L принята для расчётов в этой вкладке: ' +
-        origin + '. Для реальной DCS требуется проверка.'),
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text('Модель K/T/L принята только для текущего сеанса. '
+        'Для применения на объекте требуется инженерная проверка.'),
     ));
   }
 
   @override
   Widget build(BuildContext context) {
     final model = currentModel;
-    final modelMap = model == null ? null : {
-      'K': model.gain, 'T': model.tau, 'L': model.delay,
-    };
-    Widget content;
-    switch (selected) {
-      case 0:
-        content = WebStepTest(onIdentified: useModel);
-      case 1:
-        content = WebAutoTune(initialPlant: model);
-      case 2:
-        content = SimulationScreen(initialModel: modelMap);
-      case 3:
-        content = CircuitStudioScreen(
-          initialWiring: circuit,
-          onSave: (wiring) async {
-            setState(() => circuit = Map<String, dynamic>.from(wiring));
-          },
-        );
-      case 4:
-        content = StabilityScreen(initialModel: modelMap);
-      case 5:
-        content = RlTrackingScreen(initialModel: modelMap);
-      default:
-        content = const DualValveScreen();
-    }
     return Scaffold(
       appBar: AppBar(
-        title: const Text('PID Tuner Pro · Web Preview'),
+        title: const Text('PID Tuner Pro · Step Test'),
         backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
       ),
       body: SafeArea(child: Column(children: [
@@ -103,33 +65,16 @@ class _WebPreviewHomeState extends State<WebPreviewHome> {
           color: Theme.of(context).colorScheme.surfaceContainerLow,
           child: Text(
             model == null
-              ? 'Браузерная версия для Safari. Данные живут только во время '
-                'работы этой вкладки. SQLite и резервные копии пока не поддерживаются.'
-              : 'Активная модель: K=' + model.gain.toStringAsFixed(3) +
+              ? 'Step Test в Safari: ручной ввод или CSV. '
+                'Данные не сохраняются после закрытия или обновления вкладки.'
+              : 'Модель текущего сеанса: K=' + model.gain.toStringAsFixed(3) +
                 ', T=' + model.tau.toStringAsFixed(2) + ' с, L=' +
                 model.delay.toStringAsFixed(2) + ' с. Источник: ' +
-                source! + '. Хранение только в текущей вкладке.',
+                source! + '. Результат не сохранён.',
             style: const TextStyle(fontSize: 12),
           ),
         ),
-        SizedBox(
-          height: 54,
-          child: ListView.builder(
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            scrollDirection: Axis.horizontal,
-            itemCount: labels.length,
-            itemBuilder: (_, index) => Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 6),
-              child: ChoiceChip(
-                key: Key('web-section-' + index.toString()),
-                label: Text(labels[index]),
-                selected: selected == index,
-                onSelected: (_) => setState(() => selected = index),
-              ),
-            ),
-          ),
-        ),
-        Expanded(child: content),
+        Expanded(child: WebStepTest(onIdentified: useModel)),
       ])),
     );
   }
@@ -286,13 +231,13 @@ class _WebStepTestState extends State<WebStepTest> {
             ', NRMSE = ' + fit!.normalizedRmse.toStringAsFixed(3)),
           Text(fit!.suitableForAutoTune
             ? 'Формальные критерии качества выполнены. Нужна проверка инженера.'
-            : 'Качество недостаточно для передачи в Auto Tune.'),
+            : 'Качество идентификации недостаточно для принятия модели.'),
           if (fit!.suitableForAutoTune)
             FilledButton.icon(
               icon: const Icon(Icons.check_circle_outline),
               onPressed: () => widget.onIdentified(
                 fit!.plant, 'Step Test CSV'),
-              label: const Text('Принять модель для Auto Tune')),
+              label: const Text('Принять оценочную модель')),
           const Text('Измеренный и расчётный отклик PV · % шкалы'),
           SizedBox(height: 220,
             child: CustomPaint(
@@ -356,130 +301,3 @@ class _WebCsvPlot extends CustomPainter {
     old.measured != measured || old.predicted != predicted;
 }
 
-List<Map<String, Object>> _autoTuneWorker(List<double> raw) {
-  final plant = Plant(gain: raw[0], tau: raw[1], delay: raw[2]);
-  final run = AutoTune(plant).search();
-  return run.best.map((p) => <String, Object>{
-    'pb': p.pb,
-    'ti': p.ti,
-    'iae': p.metrics.iae,
-    'mvTravel': p.metrics.totalVariation,
-    'maxError': p.metrics.maxError,
-    'feasible': p.feasible,
-  }).toList();
-}
-
-class WebAutoTune extends StatefulWidget {
-  final Plant? initialPlant;
-  const WebAutoTune({super.key, this.initialPlant});
-
-  @override
-  State<WebAutoTune> createState() => _WebAutoTuneState();
-}
-
-class _WebAutoTuneState extends State<WebAutoTune> {
-  late final TextEditingController gain;
-  late final TextEditingController tau;
-  late final TextEditingController delay;
-  bool busy = false;
-  String? error;
-  List<Map<String, Object>>? results;
-
-  @override
-  void initState() {
-    super.initState();
-    gain = TextEditingController(
-      text: (widget.initialPlant?.gain ?? 0.8).toString());
-    tau = TextEditingController(
-      text: (widget.initialPlant?.tau ?? 12).toString());
-    delay = TextEditingController(
-      text: (widget.initialPlant?.delay ?? 3).toString());
-  }
-
-  @override
-  void dispose() {
-    gain.dispose();
-    tau.dispose();
-    delay.dispose();
-    super.dispose();
-  }
-
-  Future<void> run() async {
-    setState(() { busy = true; results = null; error = null; });
-    try {
-      double parse(TextEditingController t) =>
-        double.parse(t.text.trim().replaceAll(',', '.'));
-      final output = await compute(_autoTuneWorker,
-        [parse(gain), parse(tau), parse(delay)]);
-      if (mounted) setState(() => results = output);
-    } catch (e) {
-      if (mounted) setState(() => error = e.toString());
-    } finally {
-      if (mounted) setState(() => busy = false);
-    }
-  }
-
-  Widget number(String label, TextEditingController controller) =>
-    SizedBox(width: 140, child: TextField(
-      controller: controller,
-      keyboardType: const TextInputType.numberWithOptions(
-        signed: true, decimal: true),
-      decoration: InputDecoration(labelText: label,
-        border: const OutlineInputBorder()),
-    ));
-
-  @override
-  Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.all(16),
-    children: [
-      Text('Auto Tune · офлайн PI',
-        style: Theme.of(context).textTheme.titleLarge),
-      const SizedBox(height: 10),
-      const Text('Модель FOPDT можно передать из Step Test или '
-        'ввести вручную. Это моделирование, а не запись настроек в DCS.'),
-      if (widget.initialPlant != null) const Padding(
-        padding: EdgeInsets.only(top: 8),
-        child: Text('Получена модель из Step Test; '
-          'подтвердите допустимость инженерного применения.')),
-      const SizedBox(height: 14),
-      Wrap(spacing: 10, runSpacing: 10, children: [
-        number('K · %/%', gain),
-        number('T · с', tau),
-        number('L · с', delay),
-      ]),
-      const SizedBox(height: 14),
-      FilledButton.icon(
-        onPressed: busy ? null : run,
-        icon: const Icon(Icons.calculate_outlined),
-        label: Text(busy ? 'Расчёт…' : 'Запустить Auto Tune')),
-      if (error != null) Text(error!,
-        style: TextStyle(color: Theme.of(context).colorScheme.error)),
-      if (results != null) ...[
-        const SizedBox(height: 14),
-        Text('Лучшие рассчитанные варианты PI',
-          style: Theme.of(context).textTheme.titleMedium),
-        if (results!.isEmpty)
-          const Text('Подходящих вариантов не найдено'),
-        for (final c in results!)
-          Card(child: ListTile(
-            title: Text('PB = ' +
-              (c['pb'] as double).toStringAsFixed(2) +
-              '%, Ti = ' + (c['ti'] as double).toStringAsFixed(2) + ' с'),
-            subtitle: Text('IAE = ' +
-              (c['iae'] as double).toStringAsFixed(2) +
-              ' · Перемещение MV = ' +
-              (c['mvTravel'] as double).toStringAsFixed(2) +
-              '% · Max PV deviation = ' +
-              (c['maxError'] as double).toStringAsFixed(2) + '%'),
-            trailing: Icon(
-              (c['feasible'] as bool)
-                ? Icons.check_circle_outline : Icons.warning_amber_outlined),
-          )),
-      ],
-      const SizedBox(height: 10),
-      const Text('Прежде чем использовать результаты на объекте, '
-        'проверьте идентификацию, устойчивость, направление действия '
-        'и ограничения клапана.'),
-    ],
-  );
-}
