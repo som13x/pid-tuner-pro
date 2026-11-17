@@ -284,4 +284,121 @@ void main() {
     db.close();
   });
 
+
+  testWidgets('OptiControls Settings offer PI/PID, SM and no SIMC option',
+      (tester) async {
+    tester.view.physicalSize = const Size(430, 3300);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final db = FakeStepWebDatabase(configuration: const StepTestSettings(
+      tag: 'LIC-200',
+      profileId: 'yokogawa-centum-vp-pid',
+      controlledVariable: ControlledVariable.level,
+      tuningMethod: TuningMethod.opticontrolsLevel,
+      acquisition: StepAcquisition.manualIntegratingSlope,
+      integratingProcessConfirmed: true,
+      stabilityMargin: 2,
+    ));
+    await tester.pumpWidget(MaterialApp(home: WebPreviewHome(database: db)));
+    await tester.pumpAndSettle();
+    final tuneDrop = tester.widget<DropdownButton<TuningMethod>>(
+      find.descendant(
+        of: find.byType(DropdownButtonFormField<TuningMethod>),
+        matching: find.byType(DropdownButton<TuningMethod>),
+      ));
+    expect(tuneDrop.items!.any((item) =>
+      item.value == TuningMethod.integratingProcessSimc), false);
+    expect(tuneDrop.items!.any((item) =>
+      item.value == TuningMethod.opticontrolsLevel), true);
+    final typeDrop = tester.widget<DropdownButton<LevelControlMode>>(
+      find.descendant(
+        of: find.byKey(const Key('settings-level-mode')),
+        matching: find.byType(DropdownButton<LevelControlMode>),
+      ));
+    expect(typeDrop.items, hasLength(2));
+    expect(find.byKey(const Key('settings-stability-margin')), findsOneWidget);
+    db.close();
+  });
+
+  testWidgets('saving OptiControls PID mode and SM retains input',
+      (tester) async {
+    tester.view.physicalSize = const Size(430, 3500);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final db = FakeStepWebDatabase(configuration: const StepTestSettings(
+      tag: 'LIC-300',
+      profileId: 'yokogawa-centum-vp-pid',
+      controlledVariable: ControlledVariable.level,
+      tuningMethod: TuningMethod.opticontrolsLevel,
+      acquisition: StepAcquisition.manualIntegratingSlope,
+      integratingProcessConfirmed: true,
+    ));
+    await tester.pumpWidget(MaterialApp(home: WebPreviewHome(database: db)));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('settings-stability-margin')), '3.5');
+    await tester.tap(find.byKey(const Key('settings-level-mode')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('PID · Td = td / 2').last);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('settings-save')));
+    await tester.tap(find.byKey(const Key('settings-save')));
+    await tester.pumpAndSettle();
+    expect(db.configuration!.tag, 'LIC-300');
+    expect(db.configuration!.levelControlMode, LevelControlMode.pid);
+    expect(db.configuration!.stabilityMargin, 3.5);
+    expect(db.configuration!.lambdaSeconds, isNull);
+    expect(find.text('Step Test · LIC-300'), findsOneWidget);
+    db.close();
+  });
+
+  test('existing archived SIMC record is not rewritten as OptiControls',
+      () async {
+    final db = StepWebDatabase(factory: newIdbFactoryMemory());
+    const legacy = StepTestSettings(
+      tag: 'LIC-OLD',
+      profileId: 'yokogawa-centum-vp-pid',
+      controlledVariable: ControlledVariable.level,
+      tuningMethod: TuningMethod.integratingProcessSimc,
+      acquisition: StepAcquisition.manualIntegratingSlope,
+      integratingProcessConfirmed: true,
+      lambdaSeconds: 25,
+    );
+    await db.addIntegratingResult(
+      settings: legacy,
+      plant: const IntegratingPlant(gainPerSecond: .01, delaySeconds: 5),
+      source: 'Manual Integrating Step (legacy SIMC)',
+      evidence: {'method':'manualIntegratingRamp'},
+    );
+    const current = StepTestSettings(
+      tag: 'LIC-NEW',
+      profileId: 'yokogawa-centum-vp-pid',
+      controlledVariable: ControlledVariable.level,
+      tuningMethod: TuningMethod.opticontrolsLevel,
+      acquisition: StepAcquisition.manualIntegratingSlope,
+      integratingProcessConfirmed: true,
+      stabilityMargin: 2.5,
+    );
+    await db.saveSettings(current);
+    await db.addIntegratingResult(
+      settings: current,
+      plant: const IntegratingPlant(gainPerSecond: .01, delaySeconds: 5),
+      source: 'Manual Integrating Step (OptiControls)',
+      evidence: {'method':'manualIntegratingRamp'},
+      piEstimate: const StepPiCalculator().calculateIntegrating(
+        const IntegratingPlant(gainPerSecond: .01, delaySeconds: 5), current),
+    );
+    final rows = await db.getResults();
+    expect(rows, hasLength(2));
+    expect((rows.first['settings'] as Map)['tuningMethod'],
+      'opticontrolsLevel');
+    expect((rows.last['settings'] as Map)['tuningMethod'],
+      'integratingProcessSimc');
+    expect((rows.last['settings'] as Map)['lambdaSeconds'], 25);
+    expect(rows.last.containsKey('piEstimate'), false);
+    db.close();
+  });
+
 }
