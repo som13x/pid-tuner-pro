@@ -241,7 +241,7 @@ class StepPiCalculator {
     settings.validate();
     plant.validate();
     if (!settings.canCalculate) {
-      throw StateError(settings.tuningBlockReason);
+      throw StateError(settings.tuningBlockReason ?? 'PI unavailable');
     }
     final k = plant.gain.abs();
     final t = plant.tau;
