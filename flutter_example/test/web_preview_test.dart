@@ -60,9 +60,12 @@ void main() {
     final db = StepWebDatabase(factory: newIdbFactoryMemory());
     await tester.pumpWidget(PidTunerWebPreview(database: db));
     await tester.pumpAndSettle();
-    final field = tester.widget<DropdownButtonFormField<String>>(
-      find.byKey(const Key('settings-system')));
-    expect(field.items!.map((e) => e.value).toSet(),
+    final menu = tester.widget<DropdownButton<String>>(
+      find.descendant(
+        of: find.byKey(const Key('settings-system')),
+        matching: find.byType(DropdownButton<String>),
+      ));
+    expect(menu.items!.map((e) => e.value).toSet(),
       DcsProfiles.all.map((p) => p.id).toSet());
     db.close();
   });
