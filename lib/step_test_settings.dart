@@ -186,8 +186,7 @@ class StepTestSettings {
   bool get canCalculate =>
       tuningMethod != TuningMethod.engineeringReview &&
       (isIntegratingMethod
-        ? integratingProcessConfirmed && lambdaSeconds != null &&
-          lambdaSeconds!.isFinite && lambdaSeconds! > 0
+        ? integratingProcessConfirmed
         : !isIntegratingAcquisition &&
           (controlledVariable != ControlledVariable.level ||
             selfRegulatingLevelConfirmed));
@@ -200,11 +199,7 @@ class StepTestSettings {
       if (!integratingProcessConfirmed) {
         return 'Подтвердите по реакции PV, что объект интегрирующий.';
       }
-      if (lambdaSeconds == null || !lambdaSeconds!.isFinite ||
-          lambdaSeconds! <= 0) {
-        return 'Для SIMC требуется λ > 0 секунд.';
-      }
-      return null;
+       return null;
     }
     if (isIntegratingAcquisition) {
       return 'Для интегрирующего Step Test выберите SIMC-правила.';
@@ -396,9 +391,13 @@ class StepPiCalculator {
     if (!settings.canCalculate) {
       throw StateError(settings.tuningBlockReason ?? 'IPDT tuning blocked');
     }
-    final lambda = settings.lambdaSeconds!;
+    // If λ is not explicitly entered, use a conservative 3×L
+    // initial setting (ISA InTech integrating loop tuning guidance).
+    // Zero effective delay requires an explicitly selected λ.
+    final lambda = settings.lambdaSeconds ?? (3 * plant.delaySeconds);
     final sum = lambda + plant.delaySeconds;
-    if (!sum.isFinite || sum <= 0) {
+    if (!lambda.isFinite || lambda <= 0 ||
+        !sum.isFinite || sum <= 0) {
       throw StateError('Invalid lambda/dead-time units');
     }
     final kc = 1 / (plant.gainPerSecond.abs() * sum);
