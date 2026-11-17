@@ -137,103 +137,107 @@ void main() {
       throwsStateError);
   });
 
-  test('OptiControls 4-point estimator calculates both PV slopes', () {
+  test('OptiControls four PV values use T1/T2 minute intervals', () {
     final estimate = const IntegratingManualEstimator().estimate(
       const IntegratingManualInput(
         mvBefore: 40, mvAfter: 50,
         pv1: 35, pv2: 36, pv3: 45, pv4: 55,
-        t1Seconds: -20, t2Seconds: -10,
-        t3Seconds: 20, t4Seconds: 40,
-        delaySeconds: 5,
+        t1Minutes: 2, t2Minutes: 4, delayMinutes: .5,
         mvSpanLow: 0, mvSpanHigh: 100,
         pvSpanLow: 0, pvSpanHigh: 100,
       ));
-    expect(estimate.t1Interval, 10);
-    expect(estimate.t2Interval, 20);
-    expect(estimate.beforeSlopeNormalized, closeTo(.1, 1e-12));
-    expect(estimate.afterSlopeNormalized, closeTo(.5, 1e-12));
-    expect(estimate.deltaSlopeNormalized, closeTo(.4, 1e-12));
+    expect(estimate.t1IntervalMinutes, 2);
+    expect(estimate.t2IntervalMinutes, 4);
+    expect(estimate.deadTimeMinutes, .5);
+    expect(estimate.beforeSlopePercentPerMinute, closeTo(.5, 1e-12));
+    expect(estimate.afterSlopePercentPerMinute, closeTo(2.5, 1e-12));
+    expect(estimate.deltaSlopePercentPerMinute, closeTo(2, 1e-12));
     expect(estimate.deltaMvNormalized, 10);
-    expect(estimate.plant.gainPerSecond, closeTo(.04, 1e-12));
-    expect(estimate.evidence['method'], 'opticontrolsManualFourPoints');
+    expect(estimate.integrationRatePerMinute, closeTo(.2, 1e-12));
+    expect(estimate.plant.gainPerSecond, closeTo(.2/60, 1e-12));
+    expect(estimate.plant.delaySeconds, 30);
+    expect(estimate.evidence['method'], 'opticontrolsManualMinuteIntervals');
+    expect(estimate.evidence['timeUnit'], 'minute');
+    expect(estimate.evidence['timeInputKind'], 'elapsedInterval');
     expect(estimate.evidence['pv1'], 35);
     expect(estimate.evidence['pv2'], 36);
     expect(estimate.evidence['pv3'], 45);
     expect(estimate.evidence['pv4'], 55);
-    expect(estimate.evidence['t1Seconds'], -20);
-    expect(estimate.evidence['t2Seconds'], -10);
-    expect(estimate.evidence['t3Seconds'], 20);
-    expect(estimate.evidence['t4Seconds'], 40);
-    expect(estimate.evidence['T1Seconds'], 10);
-    expect(estimate.evidence['T2Seconds'], 20);
+    expect(estimate.evidence['T1Minutes'], 2);
+    expect(estimate.evidence['T2Minutes'], 4);
+    expect(estimate.evidence['deadTimeMinutes'], .5);
+    expect(estimate.evidence['T1Seconds'], 120);
+    expect(estimate.evidence['T2Seconds'], 240);
+    expect(estimate.evidence['delaySeconds'], 30);
     expect(estimate.evidence['qualityMetricsAvailable'], false);
 
-    // Use the measured ri in the actual OptiControls PI correlation.
+    // Multiplying Ki by 60 while dividing delay by 60 cancels:
+    // the published minute-based formula gives exactly the same Kc.
     final pi = const StepPiCalculator().calculateIntegrating(
       estimate.plant, config());
-    expect(pi.kcNormalized, closeTo(2.25, 1e-12));
-    expect(pi.tiSeconds, closeTo(33.3, 1e-12));
+    expect(pi.kcNormalized, closeTo(4.5, 1e-12));
+    expect(pi.tiSeconds, closeTo(199.8, 1e-10));
+    expect(pi.tiSeconds / 60, closeTo(3.33, 1e-12));
+
+    final pid = const StepPiCalculator().calculateIntegrating(
+      estimate.plant, config(mode: LevelControlMode.pid));
+    expect(pid.kcNormalized, closeTo(6, 1e-12));
+    expect(pid.tiSeconds / 60, closeTo(2, 1e-12));
+    expect(pid.tdSeconds / 60, closeTo(.25, 1e-12));
   });
 
-  test('4-point estimator normalizes non-100 PV and MV spans', () {
+  test('minute intervals normalize engineering unit PV/MV spans', () {
     final estimate = const IntegratingManualEstimator().estimate(
       const IntegratingManualInput(
         mvBefore: 60, mvAfter: 80, // 10% of span 0..200
-        pv1: 400, pv2: 404, // 0.4 EU/s -> 0.2%/s of span
-        pv3: 430, pv4: 446, // 0.8 EU/s -> 0.4%/s
-        t1Seconds: -20, t2Seconds: -10,
-        t3Seconds: 30, t4Seconds: 50,
-        delaySeconds: 5,
+        pv1: 400, pv2: 404, // 2 EU/min => 1%PV/min
+        pv3: 430, pv4: 446, // 4 EU/min => 2%PV/min
+        t1Minutes: 2, t2Minutes: 4, delayMinutes: 1,
         mvSpanLow: 0, mvSpanHigh: 200,
         pvSpanLow: 300, pvSpanHigh: 500,
       ));
-    expect(estimate.beforeSlopeNormalized, closeTo(.2, 1e-12));
-    expect(estimate.afterSlopeNormalized, closeTo(.4, 1e-12));
-    expect(estimate.deltaSlopeNormalized, closeTo(.2, 1e-12));
+    expect(estimate.beforeSlopePercentPerMinute, closeTo(1, 1e-12));
+    expect(estimate.afterSlopePercentPerMinute, closeTo(2, 1e-12));
+    expect(estimate.deltaSlopePercentPerMinute, closeTo(1, 1e-12));
     expect(estimate.deltaMvNormalized, 10);
-    expect(estimate.plant.gainPerSecond, closeTo(.02, 1e-12));
+    expect(estimate.integrationRatePerMinute, closeTo(.1, 1e-12));
+    expect(estimate.plant.gainPerSecond, closeTo(.1/60, 1e-12));
+    expect(estimate.plant.delaySeconds, 60);
   });
 
-  test('4-point estimator preserves sign of negative MV step', () {
+  test('minute-interval estimator preserves signed MV influence', () {
     final estimate = const IntegratingManualEstimator().estimate(
       const IntegratingManualInput(
         mvBefore: 50, mvAfter: 40,
         pv1: 35, pv2: 36, pv3: 45, pv4: 55,
-        t1Seconds: -20, t2Seconds: -10,
-        t3Seconds: 20, t4Seconds: 40,
-        delaySeconds: 5,
+        t1Minutes: 2, t2Minutes: 4, delayMinutes: .5,
         mvSpanLow: 0, mvSpanHigh: 100,
         pvSpanLow: 0, pvSpanHigh: 100,
       ));
-    expect(estimate.plant.gainPerSecond, closeTo(-.04, 1e-12));
+    expect(estimate.integrationRatePerMinute, closeTo(-.2, 1e-12));
   });
 
-  test('manual four-point measurement validates MV and observation times', () {
+  test('manual minute intervals validate duration, MV and time values', () {
     IntegratingManualInput sample({
       double mvAfter = 50,
-      double t1 = -20, double t2 = -10,
-      double t3 = 20, double t4 = 40,
-      double delay = 5,
+      double t1 = 2, double t2 = 4, double delay = .5,
     }) => IntegratingManualInput(
       mvBefore: 40, mvAfter: mvAfter,
       pv1: 35, pv2: 36, pv3: 45, pv4: 55,
-      t1Seconds: t1, t2Seconds: t2,
-      t3Seconds: t3, t4Seconds: t4,
-      delaySeconds: delay,
+      t1Minutes: t1, t2Minutes: t2, delayMinutes: delay,
       mvSpanLow: 0, mvSpanHigh: 100,
       pvSpanLow: 0, pvSpanHigh: 100,
     );
     const estimator = IntegratingManualEstimator();
     expect(() => estimator.estimate(sample(mvAfter: 40)),
       throwsArgumentError);
-    expect(() => estimator.estimate(sample(t1: -10, t2: -20)),
-      throwsArgumentError);
-    expect(() => estimator.estimate(sample(t2: 1)), throwsArgumentError);
-    expect(() => estimator.estimate(sample(t3: 4)), throwsArgumentError);
-    expect(() => estimator.estimate(sample(t4: 19)), throwsArgumentError);
+    expect(() => estimator.estimate(sample(t1: 0)), throwsArgumentError);
+    expect(() => estimator.estimate(sample(t2: -1)), throwsArgumentError);
     expect(() => estimator.estimate(sample(delay: -1)),
       throwsArgumentError);
-    expect(() => estimator.estimate(sample(t3: double.nan)),
+    expect(() => estimator.estimate(sample(t1: double.nan)),
+      throwsArgumentError);
+    expect(() => estimator.estimate(sample(t2: double.infinity)),
       throwsArgumentError);
   });
 
