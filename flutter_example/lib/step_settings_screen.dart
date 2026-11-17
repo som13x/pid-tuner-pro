@@ -21,13 +21,14 @@ class StepSettingsScreen extends StatefulWidget {
 class _StepSettingsScreenState extends State<StepSettingsScreen> {
   late final TextEditingController tag;
   late final TextEditingController comments;
-  late final TextEditingController lambda;
+  late final TextEditingController stabilityMargin;
   late String profileId;
   late ControlledVariable variable;
   late TuningMethod tuningMethod;
   late StepAcquisition acquisition;
   late bool selfRegulatingLevelConfirmed;
   late bool integratingProcessConfirmed;
+  late LevelControlMode levelControlMode;
   bool saving = false;
   String? error;
 
@@ -37,32 +38,37 @@ class _StepSettingsScreenState extends State<StepSettingsScreen> {
     final initial = widget.initialSettings;
     tag = TextEditingController(text: initial?.tag ?? '');
     comments = TextEditingController(text: initial?.comments ?? '');
-    lambda = TextEditingController(
-      text: initial?.lambdaSeconds?.toString() ?? '');
+    stabilityMargin = TextEditingController(
+      text: (initial?.stabilityMargin ?? 2.0).toString());
     profileId = initial?.profileId ?? DcsProfiles.yokogawaCentumVp.id;
     variable = initial?.controlledVariable ?? ControlledVariable.flow;
-    tuningMethod = initial?.tuningMethod ??
-      StepTestSettings.recommendedFor(variable);
+    // Never silently turn an old saved SIMC calculation into
+    // OptiControls. The user must review and save this new selection.
+    tuningMethod = initial?.tuningMethod == TuningMethod.integratingProcessSimc
+      ? TuningMethod.opticontrolsLevel
+      : (initial?.tuningMethod ?? StepTestSettings.recommendedFor(variable));
     acquisition = initial?.acquisition ?? StepAcquisition.manualDelayAndT63;
     selfRegulatingLevelConfirmed =
       initial?.selfRegulatingLevelConfirmed ?? false;
     integratingProcessConfirmed =
-      initial?.integratingProcessConfirmed ?? false;
+      initial?.tuningMethod == TuningMethod.integratingProcessSimc
+        ? false : (initial?.integratingProcessConfirmed ?? false);
+    levelControlMode = initial?.levelControlMode ?? LevelControlMode.pi;
   }
 
   @override
   void dispose() {
     tag.dispose();
     comments.dispose();
-    lambda.dispose();
+    stabilityMargin.dispose();
     super.dispose();
   }
 
   Future<void> save() async {
     setState(() { saving = true; error = null; });
     try {
-      final lambdaText = lambda.text.trim().replaceAll(',', '.');
-      final desiredLambda = lambdaText.isEmpty ? null : double.parse(lambdaText);
+      final sm = double.parse(
+        stabilityMargin.text.trim().replaceAll(',', '.'));
       final selected = StepTestSettings(
         tag: tag.text,
         comments: comments.text,
@@ -72,7 +78,10 @@ class _StepSettingsScreenState extends State<StepSettingsScreen> {
         acquisition: acquisition,
         selfRegulatingLevelConfirmed: selfRegulatingLevelConfirmed,
         integratingProcessConfirmed: integratingProcessConfirmed,
-        lambdaSeconds: desiredLambda,
+        // Keep old SIMC-specific lambda out of new calculations.
+        lambdaSeconds: null,
+        stabilityMargin: sm,
+        levelControlMode: levelControlMode,
       );
       selected.validate();
       await widget.onSave(selected);
@@ -105,6 +114,16 @@ class _StepSettingsScreenState extends State<StepSettingsScreen> {
         const SizedBox(height: 8),
         const Text('Поля Settings сохраняются в IndexedDB на этом '
           'устройстве. Данные не отправляются в облако.'),
+        if (widget.initialSettings?.tuningMethod ==
+            TuningMethod.integratingProcessSimc)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Text('Внимание: ранее сохранённые настройки SIMC '
+              'не конвертируются автоматически. Проверьте SM, PI/PID '
+              'и сохраните новый метод OptiControls перед расчётом.',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.error)),
+          ),
         const SizedBox(height: 14),
         TextField(
           key: const Key('settings-tag'),
@@ -172,7 +191,7 @@ class _StepSettingsScreenState extends State<StepSettingsScreen> {
         Text(recommended.title),
         Text(recommended.explanation),
         if (variable == ControlledVariable.level &&
-            tuningMethod != TuningMethod.integratingProcessSimc) ...[
+            tuningMethod != TuningMethod.opticontrolsLevel) ...[
           const SizedBox(height: 8),
           CheckboxListTile(
             key: const Key('settings-level-confirm'),
@@ -192,15 +211,18 @@ class _StepSettingsScreenState extends State<StepSettingsScreen> {
           initialValue: tuningMethod,
           isExpanded: true,
           decoration: inputDecoration('6. Выбранный метод расчёта PI'),
-          items: TuningMethod.values.map((m) => DropdownMenuItem(
-            value: m,
-            child: Text(m.title, overflow: TextOverflow.ellipsis),
-          )).toList(),
+          items: TuningMethod.values
+            .where((m) => m != TuningMethod.integratingProcessSimc)
+            .map((m) => DropdownMenuItem(
+              value: m,
+              child: Text(m.title, overflow: TextOverflow.ellipsis),
+            )).toList(),
           onChanged: (next) {
             if (next != null) setState(() {
-              final wasIntegrating = tuningMethod == TuningMethod.integratingProcessSimc;
+              final wasIntegrating =
+                tuningMethod == TuningMethod.opticontrolsLevel;
               tuningMethod = next;
-              final isIntegrating = next == TuningMethod.integratingProcessSimc;
+              final isIntegrating = next == TuningMethod.opticontrolsLevel;
               if (isIntegrating != wasIntegrating) {
                 acquisition = isIntegrating
                   ? StepAcquisition.manualIntegratingSlope
@@ -211,38 +233,54 @@ class _StepSettingsScreenState extends State<StepSettingsScreen> {
         ),
         const SizedBox(height: 6),
         Text(tuningMethod.explanation),
-        if (tuningMethod == TuningMethod.integratingProcessSimc) ...[
+        if (tuningMethod == TuningMethod.opticontrolsLevel) ...[
           const SizedBox(height: 10),
           CheckboxListTile(
             key: const Key('settings-integrating-confirm'),
-            title: const Text('По форме переходной характеристики '
-              'подтверждён интегрирующий процесс (PV не выходит '
-              'на новое установившееся значение)'),
-            subtitle: const Text('Без подтверждения приложение '
-              'сохранит измерения, но не выдаст PI-параметры.'),
+            title: const Text('Подтверждён интегрирующий характер объекта '
+              '(PV не выходит на новый установившийся уровень)'),
+            subtitle: const Text('Без подтверждения измерения '
+              'сохраняются, но параметры PI/PID не рассчитываются.'),
             value: integratingProcessConfirmed,
             onChanged: (v) => setState(() =>
               integratingProcessConfirmed = v ?? false),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
+          DropdownButtonFormField<LevelControlMode>(
+            key: const Key('settings-level-mode'),
+            initialValue: levelControlMode,
+            decoration: inputDecoration('Алгоритм OptiControls: PI или PID'),
+            items: const [
+              DropdownMenuItem(value: LevelControlMode.pi,
+                child: Text('PI · Td = 0')),
+              DropdownMenuItem(value: LevelControlMode.pid,
+                child: Text('PID · Td = td / 2')),
+            ],
+            onChanged: (next) {
+              if (next != null) setState(() => levelControlMode = next);
+            },
+          ),
+          const SizedBox(height: 10),
           TextField(
-            key: const Key('settings-lambda'),
-            controller: lambda,
+            key: const Key('settings-stability-margin'),
+            controller: stabilityMargin,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: inputDecoration('Желаемая λ, секунды (необязательно)'),
+            decoration: inputDecoration('Stability Margin SM (≥ 2)'),
           ),
           const SizedBox(height: 5),
-          const Text('Если λ пустая: автоматически λ = 3×L. '
-            'При L = 0 нужно ввести λ > 0 вручную. '
-            'Чем больше λ, тем спокойнее регулирование; '
-            'настройки требуют проверки устойчивости и пределов PV.'),
+          const Text('OptiControls: рекомендуется SM ≥ 2. '
+            'Повышение SM делает настройку менее агрессивной. '
+            'Коэффициент ri измеряется по изменению наклона PV; '
+            'запаздывание td обязательно > 0. '
+            'Для буферных ёмкостей с целью усреднения расхода '
+            'нужны другие правила настройки.'),
         ],
         const SizedBox(height: 10),
-        const Text('Формулы рассчитывают эквивалент PI (D = 0) в '
-          'нормированных процентах MV/PV. Выбор производителя '
-          'меняет отображаемый параметр, а НЕ передаточную функцию '
-          'объекта. Алгоритм конкретного блока, время интегрирования '
-          'и шкалы надо проверить по документации DCS.'),
+        const Text('Настройки PI/PID рассчитываются в процентах '
+          'шкал MV/PV. Для OptiControls исходные правила предполагают '
+          'взаимодействующую форму PID; конкретную DCS, '
+          'время интегрирования, производную и преобразование '
+          'в параллельную форму нужно проверить по документации.'),
         const SizedBox(height: 16),
         DropdownButtonFormField<StepAcquisition>(
           key: ValueKey('settings-step-method-' +
@@ -252,7 +290,7 @@ class _StepSettingsScreenState extends State<StepSettingsScreen> {
           decoration: inputDecoration('7. Как проводить Step Test'),
           items: StepAcquisition.values.where((m) =>
             tuningMethod == TuningMethod.engineeringReview ||
-            (tuningMethod == TuningMethod.integratingProcessSimc) ==
+            (tuningMethod == TuningMethod.opticontrolsLevel) ==
             (m == StepAcquisition.manualIntegratingSlope ||
               m == StepAcquisition.csvIntegratingTrend)
           ).map((m) => DropdownMenuItem(
