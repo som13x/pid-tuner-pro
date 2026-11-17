@@ -276,15 +276,14 @@ class _StepTestScreenState extends State<StepTestScreen> {
     try {
       final picked = await FilePicker.platform.pickFiles(
         type: FileType.custom, allowedExtensions: ['csv', 'txt'],
-        withData: true,
       );
-      if (picked == null || picked.files.isEmpty) return;
-      final file = picked.files.single;
-      if (file.bytes == null) throw const FormatException('File data unavailable');
-      if (file.bytes!.length > 10 * 1024 * 1024) {
+      if (picked.isEmpty) return;
+      final file = picked.single;
+      final bytes = await file.readAsBytes();
+      if (bytes.length > 10 * 1024 * 1024) {
         throw const FormatException('CSV file exceeds 10 MB');
       }
-      final content = utf8.decode(file.bytes!, allowMalformed: false);
+      final content = utf8.decode(bytes, allowMalformed: false);
       if (!mounted) return;
       setState(() { csv.text = content; fileName = file.name; error = null; result = null; });
     } catch (e) {
