@@ -317,8 +317,8 @@ class _WebCsvPlot extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     if (measured.isEmpty || predicted.isEmpty) return;
     const x0 = 40.0, y0 = 10.0, right = 10.0, bottom = 23.0;
-    final w = (size.width - x0 - right).clamp(1.0, double.infinity);
-    final h = (size.height - y0 - bottom).clamp(1.0, double.infinity);
+    final w = (size.width - x0 - right).clamp(1.0, double.infinity).toDouble();
+    final h = (size.height - y0 - bottom).clamp(1.0, double.infinity).toDouble();
     final values = [...measured.map((p) => p.pv),
       ...predicted.map((p) => p.pv)];
     final minY = values.reduce((a, b) => a < b ? a : b);
