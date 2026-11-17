@@ -108,8 +108,12 @@ class DcsTuningDisplay {
     'tiSeconds': tiSeconds,
     'tdSeconds': tdSeconds,
     'actionToVerify': recommendedAction,
-    'assumption': 'PV and MV are normalized to 0..100% of span; '
-        'ideal PI proportional term Kc=100/PB.',
+    'assumption': tdSeconds > 0
+        ? 'PV/MV normalized 0..100%; Kc=100/PB; '
+          'the source rule assumes interacting PID, not a validated '
+          'native block setting (parallel form requires conversion).'
+        : 'PV/MV normalized 0..100%; Kc=100/PB; '
+          'integral time and controller algorithm require verification.',
     'requiresBlockAndScalingVerification': true,
     'verifiedForDeployment': false,
     'warning': profile.warning,

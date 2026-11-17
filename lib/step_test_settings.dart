@@ -5,16 +5,20 @@ import 'integrating_step_identification.dart';
 import 'dcs_controller_profiles.dart';
 
 /// Step-test context is immutable and portable across browsers and DBs.
-/// All tuning equations use percent-of-span PV/MV and ideal PI (Td=0).
+/// Tuning uses normalized percent-of-span PV/MV. Level method supports PI/PID.
 enum ControlledVariable { flow, pressure, temperature, level, other }
 
 enum TuningMethod {
   imcConservative,
   zieglerNicholsOpenLoop,
   cohenCoonOpenLoop,
-  integratingProcessSimc,
+  integratingProcessSimc, // deprecated, kept ONLY for historical DB parsing
+  opticontrolsLevel,
   engineeringReview,
 }
+
+/// OptiControls Level Controller Tuning provides PI and interacting PID rules.
+enum LevelControlMode { pi, pid }
 
 enum StepAcquisition {
   manualDelayAndT63,
@@ -42,7 +46,9 @@ extension TuningMethodText on TuningMethod {
     TuningMethod.cohenCoonOpenLoop =>
       'Cohen–Coon (разомкнутый контур, PI)',
     TuningMethod.integratingProcessSimc =>
-      'Tuning Rules for an Integrating Process (SIMC PI)',
+      'SIMC PI (архивный метод, замещён OptiControls)',
+    TuningMethod.opticontrolsLevel =>
+      'Level Controller Tuning (OptiControls)',
     TuningMethod.engineeringReview =>
       'Без автоматической настройки / инженерная проверка',
   };
@@ -60,11 +66,18 @@ extension TuningMethodText on TuningMethod {
       'Ti = L × (30 + 3L/T)/(9 + 20L/T). '
       'Требуется L > 0; контролируйте устойчивость.',
     TuningMethod.integratingProcessSimc =>
-      'Для IPDT-модели G(s)=Ki·exp(-Ls)/s. '
-      'SIMC PI: Kc=1/(|Ki|·(λ+L)), Ti=4(λ+L), Td=0. '
-      'Ki в (%PV/с)/(%MV), λ и L в секундах. '
-      'Обычные FOPDT K/T/L и время t63 здесь не применяются. '
-      'Это теоретический расчёт, не готовые параметры блока DCS.',
+      'Архивный метод SIMC сохранён только для старых результатов. '
+      'Для новых расчётов выберите Level Controller Tuning от OptiControls.',
+    TuningMethod.opticontrolsLevel =>
+      'OptiControls, Jacques Smuts (2011). Для интегрирующего '
+      'процесса ri=(наклон PV после ступени - наклон до)/ΔMV, '
+      'с нормированными шкалами. Запаздывание td и Ti в секундах. '
+      'При SM≥2: PI Kc=0,9/(SM×|ri|×td), Ti=3,33×SM×td, Td=0; '
+      'PID Kc=1,2/(SM×|ri|×td), Ti=2×SM×td, Td=td/2. '
+      'Предполагается взаимодействующая (interacting) форма PID; '
+      'параметры конкретной DCS требуют проверки. '
+      'Это метод быстрого восстановления уровня, НЕ усредняющее '
+      'регулирование буферной ёмкости.',
     TuningMethod.engineeringReview =>
       'PID/PI автоматически не рассчитывается. Требуется адекватная '
       'модель процесса и проверка специалистом.',
@@ -152,7 +165,9 @@ class StepTestSettings {
   final StepAcquisition acquisition;
   final bool selfRegulatingLevelConfirmed;
   final bool integratingProcessConfirmed;
-  final double? lambdaSeconds;
+  final double? lambdaSeconds; // legacy SIMC settings, read-only
+  final double stabilityMargin;
+  final LevelControlMode levelControlMode;
 
   const StepTestSettings({
     required this.tag,
@@ -164,19 +179,25 @@ class StepTestSettings {
     this.selfRegulatingLevelConfirmed = false,
     this.integratingProcessConfirmed = false,
     this.lambdaSeconds,
+    this.stabilityMargin = 2.0,
+    this.levelControlMode = LevelControlMode.pi,
   });
 
   DcsControllerProfile get profile => DcsProfiles.byId(profileId);
 
   static TuningMethod recommendedFor(ControlledVariable variable) =>
       variable == ControlledVariable.level
-          ? TuningMethod.integratingProcessSimc
+          ? TuningMethod.opticontrolsLevel
           : TuningMethod.imcConservative;
 
   TuningMethod get recommendedMethod =>
       recommendedFor(controlledVariable);
 
   bool get isIntegratingMethod =>
+      tuningMethod == TuningMethod.opticontrolsLevel ||
+      tuningMethod == TuningMethod.integratingProcessSimc;
+
+  bool get isDeprecatedMethod =>
       tuningMethod == TuningMethod.integratingProcessSimc;
 
   bool get isIntegratingAcquisition =>
@@ -185,6 +206,7 @@ class StepTestSettings {
 
   bool get canCalculate =>
       tuningMethod != TuningMethod.engineeringReview &&
+      !isDeprecatedMethod &&
       (isIntegratingMethod
         ? integratingProcessConfirmed
         : !isIntegratingAcquisition &&
@@ -193,7 +215,11 @@ class StepTestSettings {
 
   String? get tuningBlockReason {
     if (tuningMethod == TuningMethod.engineeringReview) {
-      return 'Выбран метод без автоматического PI-расчёта.';
+      return 'Выбран метод без автоматической настройки.';
+    }
+    if (isDeprecatedMethod) {
+      return 'SIMC (устаревший метод) не используется для новых '
+          'расчётов. Выберите Level Controller Tuning (OptiControls).';
     }
     if (isIntegratingMethod) {
       if (!integratingProcessConfirmed) {
@@ -202,7 +228,7 @@ class StepTestSettings {
        return null;
     }
     if (isIntegratingAcquisition) {
-      return 'Для интегрирующего Step Test выберите SIMC-правила.';
+      return 'Для интегрирующего Step Test выберите Level Controller Tuning (OptiControls).';
     }
     if (controlledVariable == ControlledVariable.level &&
         !selfRegulatingLevelConfirmed) {
@@ -220,6 +246,9 @@ class StepTestSettings {
           'комментарий не должен превышать 2000 символов.');
     }
     profile;
+    if (!stabilityMargin.isFinite || stabilityMargin < 2) {
+      throw ArgumentError('OptiControls требует SM ≥ 2');
+    }
     if (lambdaSeconds != null &&
         (!lambdaSeconds!.isFinite || lambdaSeconds! <= 0 ||
         lambdaSeconds! > 8640000)) {
@@ -243,6 +272,8 @@ class StepTestSettings {
     'selfRegulatingLevelConfirmed': selfRegulatingLevelConfirmed,
     'integratingProcessConfirmed': integratingProcessConfirmed,
     'lambdaSeconds': lambdaSeconds,
+    'stabilityMargin': stabilityMargin,
+    'levelControlMode': levelControlMode.name,
   };
 
   factory StepTestSettings.fromJson(Map<String, dynamic> raw) {
@@ -272,6 +303,12 @@ class StepTestSettings {
         raw['integratingProcessConfirmed'] == true,
       lambdaSeconds: raw['lambdaSeconds'] == null ? null
         : (raw['lambdaSeconds'] as num).toDouble(),
+      stabilityMargin: raw['stabilityMargin'] == null ? 2.0
+        : (raw['stabilityMargin'] as num).toDouble(),
+      levelControlMode: raw['levelControlMode'] == null
+        ? LevelControlMode.pi
+        : parse(LevelControlMode.values,
+            raw['levelControlMode'], 'levelControlMode'),
     );
     s.validate();
     return s;
@@ -283,7 +320,10 @@ class StepPiEstimate {
   final double pbPercent;
   final double tiSeconds;
   final double tdSeconds;
-  final double lambdaSeconds;
+  final double? lambdaSeconds;
+  final double? stabilityMargin;
+  final LevelControlMode? levelControlMode;
+  final String? tuningSource;
   final DcsTuningDisplay display;
   final TuningMethod method;
 
@@ -293,13 +333,21 @@ class StepPiEstimate {
     required this.tiSeconds,
     required this.tdSeconds,
     required this.lambdaSeconds,
+    this.stabilityMargin,
+    this.levelControlMode,
+    this.tuningSource,
     required this.display,
     required this.method,
   });
 
   Map<String, Object?> toJson() => {
-    'algorithm': 'ideal-PI-normalized',
+    'algorithm': levelControlMode == LevelControlMode.pid
+        ? 'OptiControls-interacting-PID-normalized'
+        : 'ideal-PI-normalized',
     'method': method.name,
+    if (levelControlMode != null) 'levelControlMode': levelControlMode!.name,
+    if (stabilityMargin != null) 'stabilityMargin': stabilityMargin,
+    if (tuningSource != null) 'tuningSource': tuningSource,
     'kcNormalized': kcNormalized,
     'pbPercent': pbPercent,
     'tiSeconds': tiSeconds,
@@ -356,6 +404,7 @@ class StepPiCalculator {
         kc = (t / (k * l)) * (0.9 + r / 12);
         ti = l * (30 + 3 * r) / (9 + 20 * r);
       case TuningMethod.integratingProcessSimc:
+      case TuningMethod.opticontrolsLevel:
         throw StateError('Use an integrating process model (IPDT)');
       case TuningMethod.engineeringReview:
         throw StateError('Automatic tuning disabled');
@@ -379,39 +428,49 @@ class StepPiCalculator {
     );
   }
 
-  /// Skogestad original SIMC PI rules for G(s)=Ki*exp(-L*s)/s.
-  /// Reference: https://skoge.folk.ntnu.no/publications/2012/skogestad-improved-simc-pid/PIDbook-chapter5.pdf
+  /// OptiControls, Jacques Smuts: Level Controller Tuning (2011).
+  ///
+  /// Original source:
+  /// https://blog.opticontrols.com/level-control-loop-tuning/
+  ///
+  /// ri = (slope after - slope before) / dCO (%PV/second)/(%MV).
+  /// Both PI and PID variants assume interacting controller algorithm.
+  /// Correctly scaled vendor-native PID settings are NOT computed here.
   StepPiEstimate calculateIntegrating(
       IntegratingPlant plant, StepTestSettings settings) {
     settings.validate();
     plant.validate();
-    if (!settings.isIntegratingMethod) {
-      throw StateError('Only SIMC integrating rules accept an IPDT model');
+    if (settings.tuningMethod != TuningMethod.opticontrolsLevel) {
+      throw StateError('OptiControls level tuning requires IPDT and its method');
     }
     if (!settings.canCalculate) {
-      throw StateError(settings.tuningBlockReason ?? 'IPDT tuning blocked');
+      throw StateError(settings.tuningBlockReason ?? 'Level tuning blocked');
     }
-    // If λ is not explicitly entered, use a conservative 3×L
-    // initial setting (ISA InTech integrating loop tuning guidance).
-    // Zero effective delay requires an explicitly selected λ.
-    final lambda = settings.lambdaSeconds ?? (3 * plant.delaySeconds);
-    final sum = lambda + plant.delaySeconds;
-    if (!lambda.isFinite || lambda <= 0 ||
-        !sum.isFinite || sum <= 0) {
-      throw StateError('Invalid lambda/dead-time units');
+    final sm = settings.stabilityMargin;
+    final ri = plant.gainPerSecond.abs(); // normalized 1/second
+    final td = plant.delaySeconds; // seconds
+    // No arbitrary epsilon: zero measured dead time cannot use this rule.
+    if (td <= 0) {
+      throw StateError('OptiControls Level Controller Tuning requires td > 0');
     }
-    final kc = 1 / (plant.gainPerSecond.abs() * sum);
-    final ti = 4 * sum;
+    final denom = sm * ri * td;
+    final isPid = settings.levelControlMode == LevelControlMode.pid;
+    final kc = (isPid ? 1.2 : 0.9) / denom;
+    final ti = (isPid ? 2.0 : 3.33) * sm * td;
+    final derivative = isPid ? td / 2 : 0.0;
     final pb = 100 / kc;
-    if (![kc, ti, pb].every((n) => n.isFinite && n > 0)) {
-      throw StateError('IPDT PI parameters out of range');
+    if ([kc, ti, derivative, pb].any((v) => !v.isFinite) ||
+        kc <= 0 || ti <= 0 || pb <= 0) {
+      throw StateError('OptiControls settings out of numerical range');
     }
     return StepPiEstimate(
       kcNormalized: kc, pbPercent: pb,
-      tiSeconds: ti, tdSeconds: 0,
-      lambdaSeconds: lambda,
+      tiSeconds: ti, tdSeconds: derivative,
+      lambdaSeconds: null, stabilityMargin: sm,
+      levelControlMode: settings.levelControlMode,
+      tuningSource: 'https://blog.opticontrols.com/level-control-loop-tuning/',
       display: settings.profile.translate(
-        pbPercent: pb, tiSeconds: ti,
+        pbPercent: pb, tiSeconds: ti, tdSeconds: derivative,
         processGain: plant.gainPerSecond,
       ),
       method: settings.tuningMethod,

@@ -8,9 +8,10 @@ import 'package:pid_tuner_pro_core/step_identification.dart';
 import 'package:pid_tuner_pro_core/step_test_settings.dart';
 
 StepTestSettings config({
-  TuningMethod method = TuningMethod.integratingProcessSimc,
+  TuningMethod method = TuningMethod.opticontrolsLevel,
   bool confirmed = true,
-  double? lambda,
+  double sm = 2,
+  LevelControlMode mode = LevelControlMode.pi,
   StepAcquisition acquisition = StepAcquisition.manualIntegratingSlope,
   String vendor = 'yokogawa-centum-vp-pid',
 }) => StepTestSettings(
@@ -21,13 +22,14 @@ StepTestSettings config({
   tuningMethod: method,
   acquisition: acquisition,
   integratingProcessConfirmed: confirmed,
-  lambdaSeconds: lambda,
+  stabilityMargin: sm,
+  levelControlMode: mode,
 );
 
 void main() {
-  test('level recommends integrating SIMC and supports both IPDT methods', () {
+  test('level recommends OptiControls level rules and supports both IPDT methods', () {
     expect(StepTestSettings.recommendedFor(ControlledVariable.level),
-      TuningMethod.integratingProcessSimc);
+      TuningMethod.opticontrolsLevel);
     expect(config().canCalculate, true);
     expect(config(confirmed: false).canCalculate, false);
     expect(config(acquisition: StepAcquisition.csvIntegratingTrend)
@@ -37,53 +39,101 @@ void main() {
   });
 
   test('integrating settings survive roundtrip with λ and process flag', () {
-    final c = config(lambda: 120,
+    final c = config(sm: 3, mode: LevelControlMode.pid,
       vendor: DcsProfiles.abb800xaPidcc.id);
     final loaded = StepTestSettings.fromJson(c.toJson());
-    expect(loaded.lambdaSeconds, 120);
+    expect(loaded.stabilityMargin, 3);
+    expect(loaded.levelControlMode, LevelControlMode.pid);
+    expect(loaded.lambdaSeconds, isNull);
     expect(loaded.integratingProcessConfirmed, true);
-    expect(loaded.tuningMethod, TuningMethod.integratingProcessSimc);
+    expect(loaded.tuningMethod, TuningMethod.opticontrolsLevel);
     expect(loaded.acquisition, StepAcquisition.manualIntegratingSlope);
     expect(loaded.profileId, DcsProfiles.abb800xaPidcc.id);
   });
 
-  test('SIMC IPDT PI yields expected normalized Kc/PB/Ti', () {
-    const plant = IntegratingPlant(gainPerSecond: 0.04, delaySeconds: 5);
-    final r = const StepPiCalculator().calculateIntegrating(
-      plant, config(lambda: 30));
-    expect(r.kcNormalized, closeTo(1 / (0.04 * 35), 1e-12));
-    expect(r.pbPercent, closeTo(140, 1e-12));
-    expect(r.tiSeconds, 140);
+  test('OptiControls PI: Kc=0.9/(SM ri td), Ti=3.33 SM td', () {
+    const plant = IntegratingPlant(gainPerSecond: .04, delaySeconds: 5);
+    final r = const StepPiCalculator().calculateIntegrating(plant, config());
+    expect(r.kcNormalized, closeTo(2.25, 1e-12));
+    expect(r.pbPercent, closeTo(100 / 2.25, 1e-12));
+    expect(r.tiSeconds, closeTo(33.3, 1e-12));
     expect(r.tdSeconds, 0);
-    expect(r.lambdaSeconds, 30);
-    expect(r.display.proportionalValue, closeTo(140, 1e-12));
+    expect(r.lambdaSeconds, isNull);
+    expect(r.stabilityMargin, 2);
+    expect(r.levelControlMode, LevelControlMode.pi);
+    expect(r.display.proportionalValue, closeTo(100/2.25, 1e-12));
     expect(r.toJson()['verifiedForDcsDeployment'], false);
+    expect(r.toJson()['tuningSource'],
+      'https://blog.opticontrols.com/level-control-loop-tuning/');
   });
 
-  test('default conservative lambda 3L with normalized vendor display', () {
-    const plant = IntegratingPlant(gainPerSecond: -0.04, delaySeconds: 5);
-    final r = const StepPiCalculator().calculateIntegrating(
-      plant, config(vendor: DcsProfiles.siemensPcs7Pidconl.id));
-    expect(r.lambdaSeconds, 15);
-    expect(r.kcNormalized, closeTo(1.25, 1e-12));
-    expect(r.pbPercent, closeTo(80, 1e-12));
-    expect(r.tiSeconds, 80);
-    expect(r.display.proportionalValue, closeTo(1.25, 1e-12));
+  test('OptiControls PID: Kc=1.2/(SM ri td), Ti=2 SM td, Td=td/2', () {
+    const plant = IntegratingPlant(gainPerSecond: .04, delaySeconds: 5);
+    final r = const StepPiCalculator().calculateIntegrating(plant,
+      config(mode: LevelControlMode.pid));
+    expect(r.kcNormalized, closeTo(3, 1e-12));
+    expect(r.pbPercent, closeTo(100 / 3, 1e-12));
+    expect(r.tiSeconds, 20);
+    expect(r.tdSeconds, 2.5);
+    expect(r.display.tdSeconds, 2.5);
+    expect(r.levelControlMode, LevelControlMode.pid);
+    expect(r.toJson()['algorithm'],
+      'OptiControls-interacting-PID-normalized');
+    expect((r.display.toJson()['assumption'] as String),
+      contains('interacting PID'));
+  });
+
+  test('increasing stability margin reduces gain and slows PI', () {
+    const model = IntegratingPlant(gainPerSecond: .04, delaySeconds: 5);
+    final a = const StepPiCalculator().calculateIntegrating(model, config());
+    final b = const StepPiCalculator().calculateIntegrating(model,
+      config(sm: 4));
+    expect(b.kcNormalized, closeTo(a.kcNormalized / 2, 1e-12));
+    expect(b.tiSeconds, closeTo(a.tiSeconds * 2, 1e-12));
+    expect(b.pbPercent, closeTo(a.pbPercent * 2, 1e-12));
+  });
+
+  test('different vendor shows normalized Kc and sign changes action', () {
+    const model = IntegratingPlant(gainPerSecond: -.04, delaySeconds: 5);
+    final r = const StepPiCalculator().calculateIntegrating(model,
+      config(vendor: DcsProfiles.siemensPcs7Pidconl.id,
+        mode: LevelControlMode.pid, sm: 3));
+    expect(r.kcNormalized, closeTo(2, 1e-12));
+    expect(r.pbPercent, 50);
+    expect(r.tiSeconds, 30);
+    expect(r.tdSeconds, 2.5);
+    expect(r.display.proportionalValue, 2);
     expect(r.display.recommendedAction, 'direct');
   });
 
-  test('IPDT cannot be tuned with FOPDT rule or unconfirmed behaviour', () {
-    const model = IntegratingPlant(gainPerSecond: 0.04, delaySeconds: 5);
+  test('OptiControls requires td > 0 and SM ≥ 2', () {
+    const plant = IntegratingPlant(gainPerSecond: .04, delaySeconds: 5);
+    expect(() => config(sm: 1.9).validate(), throwsArgumentError);
+    expect(() => config(sm: double.nan).validate(), throwsArgumentError);
     expect(() => const StepPiCalculator().calculateIntegrating(
-      model, config(confirmed: false)), throwsStateError);
-    expect(() => const StepPiCalculator().calculateIntegrating(
-      const IntegratingPlant(gainPerSecond: 0.03, delaySeconds: 0),
+      const IntegratingPlant(gainPerSecond: .04, delaySeconds: 0),
       config()), throwsStateError);
     expect(() => const StepPiCalculator().calculateIntegrating(
-      model, config(method: TuningMethod.engineeringReview)),
+      plant, config(confirmed: false)), throwsStateError);
+    expect(() => const StepPiCalculator().calculateIntegrating(
+      plant, config(method: TuningMethod.engineeringReview)),
       throwsStateError);
     expect(() => const StepPiCalculator().calculate(
       const Plant(gain: 1, tau: 15, delay: 3), config()),
+      throwsStateError);
+  });
+
+  test('old SIMC settings stay archived but cannot generate new tunes', () {
+    final raw = config().toJson()
+      ..['tuningMethod'] = 'integratingProcessSimc'
+      ..['lambdaSeconds'] = 30.0;
+    final historic = StepTestSettings.fromJson(raw);
+    expect(historic.isDeprecatedMethod, true);
+    expect(historic.canCalculate, false);
+    expect(historic.tuningBlockReason, contains('устаревший'));
+    expect(historic.lambdaSeconds, 30);
+    expect(() => const StepPiCalculator().calculateIntegrating(
+      const IntegratingPlant(gainPerSecond: .04, delaySeconds: 5), historic),
       throwsStateError);
   });
 
