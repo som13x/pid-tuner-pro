@@ -274,7 +274,7 @@ class _StepTestScreenState extends State<StepTestScreen> {
 
   Future<void> importCsv() async {
     try {
-      final picked = await FilePicker.platform.pickFiles(
+      final picked = await FilePicker.pickFiles(
         type: FileType.custom, allowedExtensions: ['csv', 'txt'],
       );
       if (picked.isEmpty) return;
