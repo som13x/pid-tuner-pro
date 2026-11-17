@@ -190,7 +190,7 @@ class CascadeCircuitSimulator {
     final dt = config.dt;
     final outerPid = CentumPidSimulator(CentumPidConfig(
       pb: config.ticPb, ti: config.ticTi, dt: dt,
-      action: config.temperature.gain * config.flow.gain > 0
+      action: config.temperature.gain > 0
           ? ControllerAction.reverse : ControllerAction.direct));
     final innerPid = CentumPidSimulator(CentumPidConfig(
       pb: config.ficPb, ti: config.ficTi, dt: dt,
