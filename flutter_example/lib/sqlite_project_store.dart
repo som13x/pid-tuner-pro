@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'project_store.dart';
-import 'model_management.dart';
 
 /// Drift-backed repository. Tables are defined with SQL to avoid generated files.
 /// All writes occur in a single SQLite transaction.
