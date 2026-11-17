@@ -7,7 +7,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   verify-and-build:
@@ -20,25 +20,39 @@ jobs:
           cache: true
       - name: Flutter and Dart versions
         run: flutter --version && dart --version
-      - name: Core dependencies and tests
+      - name: Core dependencies, tests, and analysis
         run: |
           dart pub get
           dart test
-      - name: App dependencies and tests
+          flutter analyze --no-fatal-infos
+      - name: App dependencies, tests, and analysis
         working-directory: flutter_example
         run: |
           flutter pub get
           flutter test
-      - name: Analyze Flutter application
-        working-directory: flutter_example
-        run: flutter analyze --no-fatal-infos
-      - name: Build debug APK
+          flutter analyze --no-fatal-infos
+      - name: Build split debug APKs
         working-directory: flutter_example
         run: flutter build apk --debug --split-per-abi
-      - name: Upload installable debug APK
+      - name: Upload installable debug APKs
         uses: actions/upload-artifact@v4
         with:
           name: pid-tuner-pro-android-debug
           path: flutter_example/build/app/outputs/flutter-apk/*.apk
           if-no-files-found: error
           retention-days: 90
+      - name: Publish APKs to preview release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          apk_dir=flutter_example/build/app/outputs/flutter-apk
+          sha256sum "$apk_dir"/*.apk > "$apk_dir/SHA256SUMS"
+          gh release view android-preview >/dev/null 2>&1 || \
+            gh release create android-preview \
+              --target "$GITHUB_SHA" \
+              --prerelease \
+              --title "PID Tuner Pro Android preview" \
+              --notes "Debug APKs built from the latest successful main branch run."
+          gh release upload android-preview "$apk_dir"/*.apk "$apk_dir/SHA256SUMS" --clobber
