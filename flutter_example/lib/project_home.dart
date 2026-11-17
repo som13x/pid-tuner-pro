@@ -1,4 +1,7 @@
 import 'dart:io';
+import 'dart:convert';
+import 'dart:typed_data';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pid_tuner_pro_core/auto_tune.dart';
@@ -7,6 +10,7 @@ import 'package:pid_tuner_pro_core/step_identification.dart';
 import 'stability_screen.dart' show StabilityScreen;
 import 'project_store.dart';
 import 'sqlite_project_store.dart';
+import 'project_backup.dart';
 import 'model_history_screen.dart';
 import 'simulation_screen.dart';
 import 'dual_valve_screen.dart';
@@ -38,6 +42,75 @@ class _ProjectHomeState extends State<ProjectHome> {
       if (oldStore != null) await oldStore.close();
     } catch (e) {
       if (mounted) setState(() { _error = '$e'; _loading = false; });
+    }
+  }
+
+  bool _backupBusy = false;
+
+  Future<void> _exportBackup() async {
+    if (_store == null || _backupBusy) return;
+    setState(() => _backupBusy = true);
+    try {
+      final json = await _store!.exportProjectBackup();
+      final fileName = 'pid-tuner-pro-backup-' +
+        DateTime.now().toUtc().toIso8601String().substring(0, 10) + '.json';
+      final location = await FilePicker.saveFile(
+        dialogTitle: 'Сохранить резервную копию PID Tuner Pro',
+        fileName: fileName,
+        bytes: Uint8List.fromList(utf8.encode(json)),
+      );
+      if (!mounted || location == null) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Резервная копия сохранена. Храните файл вне приложения.')));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось экспортировать архив: ' + e.toString())));
+    } finally {
+      if (mounted) setState(() => _backupBusy = false);
+    }
+  }
+
+  Future<void> _importBackup() async {
+    if (_store == null || _backupBusy) return;
+    setState(() => _backupBusy = true);
+    try {
+      final files = await FilePicker.pickFiles(
+        type: FileType.custom, allowedExtensions: ['json']);
+      if (files.isEmpty) return;
+      final bytes = await files.single.readAsBytes();
+      if (bytes.length > 25 * 1024 * 1024) {
+        throw const FormatException('Архив превышает 25 МБ');
+      }
+      final json = utf8.decode(bytes, allowMalformed: false);
+      final info = inspectProjectBackup(json);
+      if (!mounted) return;
+      final replace = _projects.isNotEmpty;
+      final approved = await showDialog<bool>(context: context, builder: (ctx) =>
+        AlertDialog(
+          title: const Text('Восстановление архива'),
+          content: Text('Найдено контуров: ' + info.loops.toString() +
+            ', моделей: ' + info.identifications.toString() +
+            ', событий: ' + info.events.toString() + '.\n\n' +
+            (replace ? 'ВНИМАНИЕ: все текущие контуры и их история будут ЗАМЕНЕНЫ архивом. Сначала сохраните резервную копию существующих данных.' : 'Архив будет импортирован в пустую базу.')),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Отмена')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true),
+              child: Text(replace ? 'Заменить данные' : 'Восстановить')),
+          ],
+        ));
+      if (approved != true || !mounted) return;
+      await _store!.restoreProjectBackup(json, replaceExisting: replace);
+      final projects = await _store!.load();
+      if (!mounted) return;
+      setState(() => _projects = projects);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Проекты и история успешно восстановлены.')));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Ошибка восстановления: ' + e.toString())));
+    } finally {
+      if (mounted) setState(() => _backupBusy = false);
     }
   }
 
@@ -132,6 +205,19 @@ class _ProjectHomeState extends State<ProjectHome> {
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('PID Tuner Pro'), actions: [
       IconButton(tooltip: 'Обновить', onPressed: _load, icon: const Icon(Icons.refresh)),
+      PopupMenuButton<String>(
+        tooltip: 'Резервные копии',
+        enabled: !_backupBusy && _store != null,
+        icon: const Icon(Icons.save_alt),
+        onSelected: (value) {
+          if (value == 'export') { _exportBackup(); }
+          if (value == 'import') { _importBackup(); }
+        },
+        itemBuilder: (_) => const [
+          PopupMenuItem(value: 'export', child: Text('Экспортировать архив JSON')),
+          PopupMenuItem(value: 'import', child: Text('Восстановить из JSON')),
+        ],
+      ),
     ]),
     floatingActionButton: FloatingActionButton.extended(onPressed: _create,
       icon: const Icon(Icons.add), label: const Text('Новый контур')),
