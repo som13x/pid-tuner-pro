@@ -146,7 +146,7 @@ class _ProjectHomeState extends State<ProjectHome> {
             child: Text('Пока нет контуров. Создайте первый проект.'))),
           for (final p in _projects) Card(child: ExpansionTile(
             title: Text(p.tag), subtitle: Text('${p.description}\n${p.vendor} · ${p.controllerBlock}'),
-            isThreeLine: true, children: [
+            children: [
               Wrap(spacing: 8, children: [
                 OutlinedButton(onPressed: () => _stepTest(p), child: const Text('Step Test')),
                 OutlinedButton(onPressed: _store == null ? null : () async {

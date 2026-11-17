@@ -28,7 +28,7 @@ class _ModelHistoryScreenState extends State<ModelHistoryScreen> {
     } catch (e) { if (mounted) setState(() { error = '$e'; loading = false; }); }
   }
 
-  Future<void> activate(StoredIdentification m) async {
+  Future<void> activateModel(StoredIdentification m) async {
     try { await widget.db.selectActiveModel(widget.loopId, m.id); await refresh(); }
     catch (e) { if (mounted) setState(() => error = '$e'); }
   }
@@ -85,7 +85,7 @@ class _ModelHistoryScreenState extends State<ModelHistoryScreen> {
             '${m.operatingPoint ?? 'Рабочая точка не указана'}'),
           isThreeLine: true,
           trailing: PopupMenuButton<String>(onSelected: (v) {
-            if (v == 'activate') activate(m);
+            if (v == 'activate') activateModel(m);
             if (v == 'point') editPoint(m);
           }, itemBuilder: (_) => [
             const PopupMenuItem(value: 'activate', child: Text('Сделать активной')),
@@ -117,7 +117,7 @@ class _ModelHistoryScreenState extends State<ModelHistoryScreen> {
                     'Worst IAE=${(c['worstIae'] as num).toStringAsFixed(2)}'),
                 Text(lastResult!['warning'] as String),
               ],
-            ]))));
+            ])));
         }),
       ]),
   );

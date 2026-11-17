@@ -171,6 +171,11 @@ class _DualValveScreenState extends State<DualValveScreen> {
 }
 
 class _DualValvePainter extends CustomPainter {
+  static const names = <String, String>{
+    'pi': 'PI',
+    'filteredPv': 'PI + PV filter',
+    'measuredFeedforward': 'PI + measured FF',
+  };
   final List<Map<String, dynamic>> runs;
   final int signal, selected;
   _DualValvePainter(this.runs, this.signal, this.selected);
