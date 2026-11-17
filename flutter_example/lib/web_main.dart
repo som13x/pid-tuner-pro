@@ -107,7 +107,7 @@ class _WebPreviewHomeState extends State<WebPreviewHome> {
   Widget build(BuildContext context) {
     if (loading) {
       return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+        body: Center(child: Text('Загрузка настроек из IndexedDB…')),
       );
     }
     return Scaffold(
