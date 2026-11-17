@@ -75,16 +75,25 @@ class LoopProject {
   }
 
   LoopProject withIdentification({required Map<String, double> model,
-    required String source, required double rSquared, required double nrmse}) {
+    required String source, double? rSquared, double? nrmse,
+    Map<String, Object?>? manualEvidence}) {
     if (!model.values.every((v) => v.isFinite) || model['T'] == null ||
         model['K'] == null || model['L'] == null || model['T']! <= 0 ||
-        model['L']! < 0 || model['K'] == 0) {
+        model['L']! < 0 || model['K'] == 0 || source.trim().isEmpty ||
+        (rSquared != null && !rSquared.isFinite) ||
+        (nrmse != null && (!nrmse.isFinite || nrmse < 0)) ||
+        (manualEvidence != null &&
+          (rSquared != null || nrmse != null ||
+           !source.startsWith('Manual Step')))) {
       throw ArgumentError('Invalid FOPDT model');
     }
     final event = <String, Object?>{'type': 'identification',
       'at': DateTime.now().toUtc().toIso8601String(), 'source': source,
       'model': Map<String, double>.from(model), 'rSquared': rSquared,
-      'normalizedRmse': nrmse};
+      'normalizedRmse': nrmse,
+      if (manualEvidence != null) 'manualEvidence':
+        Map<String, Object?>.from(manualEvidence),
+      if (manualEvidence != null) 'requiresEngineeringReview': true};
     return LoopProject(id: id, tag: tag, description: description,
       vendor: vendor, controllerBlock: controllerBlock, createdAt: createdAt,
       identifiedModel: Map<String, double>.from(model),
