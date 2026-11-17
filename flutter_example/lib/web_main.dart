@@ -474,7 +474,7 @@ class _WebStepTestState extends State<WebStepTest> {
           ' · ' + settings.controlledVariable.title),
         const SizedBox(height: 4),
         Text('Метод: ' + settings.acquisition.title),
-        Text('Расчёт PI: ' + settings.tuningMethod.title),
+        Text('Расчёт: ' + settings.tuningMethod.title),
         const SizedBox(height: 8),
         ExpansionTile(
           title: const Text('Как проводить Step Test'),
@@ -592,7 +592,9 @@ class _WebStepTestState extends State<WebStepTest> {
             key: const Key('step-saved-status'),
             style: const TextStyle(fontWeight: FontWeight.w600)),
           if (latestPi != null) ...[
-            Text('Предварительная настройка PI (' +
+            Text('Предварительная настройка ' +
+              (latestPi!.levelControlMode == LevelControlMode.pid
+                ? 'PID' : 'PI') + ' (' +
               settings.tuningMethod.title + ')',
               style: Theme.of(context).textTheme.titleMedium),
             Text(latestPi!.display.profile.proportionalLabel + ': ' +
@@ -600,14 +602,15 @@ class _WebStepTestState extends State<WebStepTest> {
             Text('PB = ' + latestPi!.pbPercent.toStringAsFixed(3) +
               ' %, Kc = ' + latestPi!.kcNormalized.toStringAsFixed(4) +
               ', Ti = ' + latestPi!.tiSeconds.toStringAsFixed(2) +
-              ' с, Td = 0 с'),
+              ' с, Td = ' + latestPi!.tdSeconds.toStringAsFixed(2) + ' с'),
             Text('Направление действия для проверки: ' +
               latestPi!.display.recommendedAction),
             Text(latestPi!.display.profile.warning),
           ],
           if (tuningWarning != null) Text(tuningWarning!),
           const Text('Не переносить параметры в DCS без '
-            'проверки блока, единиц, шкал и устойчивости.'),
+            'проверки PID-формы (interacting/parallel), блока, '
+            'единиц, шкал и устойчивости.'),
         ],
         if (widget.results.isNotEmpty) ...[
           const SizedBox(height: 20),
