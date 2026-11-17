@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:pid_tuner_pro_core/auto_tune.dart';
+import 'package:pid_tuner_pro_core/manual_step_identification.dart';
 import 'package:pid_tuner_pro_core/step_identification.dart';
 import 'package:pid_tuner_pro_core/step_test_settings.dart';
 import 'package:pid_tuner_pro_core/trend_csv.dart';
@@ -312,7 +313,7 @@ class _WebStepTestState extends State<WebStepTest> {
     }
   }
 
-  void acceptManual(estimate) {
+  void acceptManual(ManualStepEstimate estimate) {
     unawaited(saveResult(
       plant: estimate.plant,
       source: 'Manual Step ' + estimate.input.method.name,
