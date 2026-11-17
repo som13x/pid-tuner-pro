@@ -21,7 +21,7 @@ const levelSettings = StepTestSettings(
 );
 
 void main() {
-  testWidgets('Settings -> Step Test shows all PV1..PV4 and t1..t4 fields',
+  testWidgets('Settings -> Step Test has four PV and T1/T2 minute inputs',
       (tester) async {
     tester.view.physicalSize = const Size(430, 2200);
     tester.view.devicePixelRatio = 1;
@@ -33,17 +33,21 @@ void main() {
     await tester.tap(find.byKey(const Key('top-step-test')));
     await tester.pumpAndSettle();
 
-    for (final key in ['pv1','pv2','pv3','pv4',
-      't1','t2','t3','t4']) {
+    for (final key in ['pv1','pv2','pv3','pv4','T1','T2','delay']) {
       expect(find.byKey(Key('integrating-' + key)), findsOneWidget);
+    }
+    for (final obsolete in ['t1','t2','t3','t4','baselineSlope']) {
+      expect(find.byKey(Key('integrating-' + obsolete)), findsNothing);
     }
     expect(find.text('Slope 1 · до ступени MV'), findsOneWidget);
     expect(find.text('Slope 2 · после запаздывания'), findsOneWidget);
-    expect(find.byKey(const Key('integrating-baselineSlope')), findsNothing);
+    expect(find.text('T1, мин'), findsOneWidget);
+    expect(find.text('T2, мин'), findsOneWidget);
+    expect(find.text('Запаздывание td, мин'), findsOneWidget);
     db.close();
   });
 
-  testWidgets('4-point form calculates slopes, DS and passes evidence',
+  testWidgets('minute interval form computes DS and passes evidence',
       (tester) async {
     tester.view.physicalSize = const Size(430, 2200);
     tester.view.devicePixelRatio = 1;
@@ -61,9 +65,7 @@ void main() {
       'mvBefore': '40', 'mvAfter': '50',
       'pv1': '35', 'pv2': '36',
       'pv3': '45', 'pv4': '55',
-      't1': '-20', 't2': '-10',
-      't3': '20', 't4': '40',
-      'delay': '5',
+      'T1': '2', 'T2': '4', 'delay': '0.5',
     };
     for (final item in inputs.entries) {
       await tester.enterText(
@@ -72,26 +74,27 @@ void main() {
     await tester.tap(find.byKey(const Key('integrating-calculate')));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('ri = 0.040000 1/с'), findsOneWidget);
-    expect(find.textContaining('T1 = 10.00 с; T2 = 20.00 с'), findsOneWidget);
-    expect(find.textContaining('DS = 0.40000 %/с'), findsOneWidget);
+    expect(find.textContaining('ri = 0.200000 1/мин'), findsOneWidget);
+    expect(find.textContaining('T1 = 2.000 мин; T2 = 4.000 мин'),
+      findsOneWidget);
+    expect(find.textContaining('DS = 2.00000 %/мин'), findsOneWidget);
     await tester.tap(find.byKey(const Key('integrating-save')));
     expect(estimate, isNotNull);
-    expect(estimate!.plant.gainPerSecond, closeTo(.04, 1e-12));
+    expect(estimate!.plant.gainPerSecond, closeTo(.2 / 60, 1e-12));
+    expect(estimate!.plant.delaySeconds, 30);
     expect(estimate!.evidence['pv3'], 45);
-    expect(estimate!.evidence['t4Seconds'], 40);
+    expect(estimate!.evidence['T2Minutes'], 4);
+    expect(estimate!.evidence['deadTimeMinutes'], .5);
   });
 
-  test('IndexedDB preserves all eight measured point values for audit',
+  test('IndexedDB preserves four PV and minute durations separately',
       () async {
     final factory = newIdbFactoryMemory();
     final db = StepWebDatabase(factory: factory);
     const input = IntegratingManualInput(
       mvBefore: 40, mvAfter: 50,
       pv1: 35, pv2: 36, pv3: 45, pv4: 55,
-      t1Seconds: -20, t2Seconds: -10,
-      t3Seconds: 20, t4Seconds: 40,
-      delaySeconds: 5,
+      t1Minutes: 2, t2Minutes: 4, delayMinutes: .5,
       mvSpanLow: 0, mvSpanHigh: 100,
       pvSpanLow: 0, pvSpanHigh: 100,
     );
@@ -100,7 +103,7 @@ void main() {
     await db.addIntegratingResult(
       settings: levelSettings,
       plant: result.plant,
-      source: 'Manual Integrating Step (OptiControls 4 points)',
+      source: 'Manual Integrating Step (OptiControls minute intervals)',
       evidence: result.evidence,
     );
     db.close();
@@ -109,17 +112,28 @@ void main() {
     expect(rows, hasLength(1));
     final evidence = rows.single['evidence'] as Map;
     for (final key in ['pv1','pv2','pv3','pv4',
-      't1Seconds','t2Seconds','t3Seconds','t4Seconds']) {
+      'T1Minutes','T2Minutes','deadTimeMinutes']) {
       expect(evidence.containsKey(key), true,
-        reason: 'Must preserve ' + key + ' for the test audit');
+        reason: 'Must preserve ' + key + ' for test audit');
     }
+    for (final key in [
+      't1Seconds','t2Seconds','t3Seconds','t4Seconds',
+    ]) {
+      expect(evidence.containsKey(key), false,
+        reason: 'No synthetic absolute timestamps should be stored');
+    }
+    expect(evidence['timeUnit'], 'minute');
+    expect(evidence['timeInputKind'], 'elapsedInterval');
     expect(evidence['pv3'], 45);
     expect(evidence['pv4'], 55);
-    expect(evidence['t3Seconds'], 20);
-    expect(evidence['t4Seconds'], 40);
-    expect(evidence['T1Seconds'], 10);
-    expect(evidence['T2Seconds'], 20);
-    expect(rows.single['model'], containsPair('KiPerSecond', .04));
+    expect(evidence['T1Minutes'], 2);
+    expect(evidence['T2Minutes'], 4);
+    expect(evidence['deadTimeMinutes'], .5);
+    expect(evidence['T1Seconds'], 120);
+    expect(evidence['T2Seconds'], 240);
+    expect((rows.single['model'] as Map)['KiPerSecond'],
+      closeTo(.2/60, 1e-12));
+    expect((rows.single['model'] as Map)['L'], 30);
     reloaded.close();
   });
 }
