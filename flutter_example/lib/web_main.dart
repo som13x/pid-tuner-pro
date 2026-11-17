@@ -5,11 +5,13 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:pid_tuner_pro_core/auto_tune.dart';
 import 'package:pid_tuner_pro_core/manual_step_identification.dart';
+import 'package:pid_tuner_pro_core/integrating_step_identification.dart';
 import 'package:pid_tuner_pro_core/step_identification.dart';
 import 'package:pid_tuner_pro_core/step_test_settings.dart';
 import 'package:pid_tuner_pro_core/trend_csv.dart';
 
 import 'manual_step_form.dart';
+import 'integrating_manual_form.dart';
 import 'step_settings_screen.dart';
 import 'step_web_database.dart';
 
@@ -187,6 +189,7 @@ class _WebStepTestState extends State<WebStepTest> {
   final pvHigh = TextEditingController(text: '1000');
   final manualStepAt = TextEditingController();
   IdentificationResult? fit;
+  IntegratingIdentificationResult? integratingFit;
   List<TrendPoint>? measured;
   List<TrendPoint>? fitted;
   String? error;
@@ -197,8 +200,11 @@ class _WebStepTestState extends State<WebStepTest> {
   bool loading = false;
   bool saving = false;
 
+  bool get integratingMode => widget.settings.isIntegratingAcquisition;
+
   bool get manualMode =>
-    widget.settings.acquisition != StepAcquisition.csvTrend;
+    widget.settings.acquisition != StepAcquisition.csvTrend &&
+    widget.settings.acquisition != StepAcquisition.csvIntegratingTrend;
 
   @override
   void dispose() {
@@ -227,6 +233,7 @@ class _WebStepTestState extends State<WebStepTest> {
         csv.text = decoded;
         fileName = file.name;
         fit = null;
+        integratingFit = null;
         error = null;
         savedStatus = null;
         latestPi = null;
@@ -246,19 +253,36 @@ class _WebStepTestState extends State<WebStepTest> {
       final points = const TrendCsv().parse(csv.text,
         mvHigh: value(mvHigh), pvHigh: value(pvHigh));
       final step = manualStepAt.text.trim();
-      final result = const StepIdentifier().identify(points,
-        manualStepAt: step.isEmpty ? null : value(manualStepAt));
-      setState(() {
-        fit = result;
-        measured = points;
-        fitted = fittedResponse(points, result);
-        error = null;
-        savedStatus = null;
-        latestPi = null;
-      });
+      final stepTime = step.isEmpty ? null : value(manualStepAt);
+      if (integratingMode) {
+        final result = const IntegratingStepIdentifier().identify(
+          points, manualStepAt: stepTime);
+        setState(() {
+          integratingFit = result;
+          fit = null;
+          measured = points;
+          fitted = result.fittedCurve;
+          error = null;
+          savedStatus = null;
+          latestPi = null;
+        });
+      } else {
+        final result = const StepIdentifier().identify(
+          points, manualStepAt: stepTime);
+        setState(() {
+          fit = result;
+          integratingFit = null;
+          measured = points;
+          fitted = fittedResponse(points, result);
+          error = null;
+          savedStatus = null;
+          latestPi = null;
+        });
+      }
     } catch (e) {
       setState(() {
         fit = null;
+        integratingFit = null;
         measured = null;
         fitted = null;
         error = 'Не удалось идентифицировать: ' + e.toString();
@@ -311,6 +335,88 @@ class _WebStepTestState extends State<WebStepTest> {
     } finally {
       if (mounted) setState(() => saving = false);
     }
+  }
+
+  Future<void> saveIntegratingResult({
+    required IntegratingPlant plant,
+    required String source,
+    required Map<String, Object?> evidence,
+    String? originalCsv,
+    bool fitAcceptable = true,
+  }) async {
+    if (saving) return;
+    setState(() {
+      saving = true;
+      error = null;
+      savedStatus = null;
+      tuningWarning = null;
+      latestPi = null;
+    });
+    try {
+      StepPiEstimate? pi;
+      String? warning = widget.settings.tuningBlockReason;
+      if (!fitAcceptable) {
+        warning = 'Качество CSV идентификации недостаточно: '
+          'PI не рассчитывается. Сохранён только результат анализа.';
+      } else if (widget.settings.canCalculate) {
+        try {
+          pi = const StepPiCalculator().calculateIntegrating(
+            plant, widget.settings);
+        } catch (e) {
+          warning = 'PI не рассчитан: ' + e.toString();
+        }
+      }
+      await widget.database.addIntegratingResult(
+        settings: widget.settings, plant: plant,
+        source: source, evidence: evidence,
+        piEstimate: pi, originalCsv: originalCsv,
+      );
+      await widget.onResultSaved();
+      if (!mounted) return;
+      setState(() {
+        latestPi = pi;
+        tuningWarning = warning;
+        savedStatus = 'IPDT Step Test сохранён в IndexedDB с Settings.';
+      });
+    } catch (e) {
+      if (mounted) setState(() =>
+        error = 'IPDT результат НЕ сохранён: ' + e.toString());
+    } finally {
+      if (mounted) setState(() => saving = false);
+    }
+  }
+
+  void acceptIntegratingManual(IntegratingManualEstimate estimate) {
+    unawaited(saveIntegratingResult(
+      plant: estimate.plant,
+      source: 'Manual Integrating Step',
+      evidence: estimate.evidence,
+    ));
+  }
+
+  void acceptIntegratingCsv() {
+    final r = integratingFit;
+    if (r == null) return;
+    unawaited(saveIntegratingResult(
+      plant: r.plant, source: 'Integrating Step CSV',
+      fitAcceptable: r.suitableForTuning,
+      evidence: {
+        'method': 'csvIpdtRampFit',
+        'stepAtSeconds': r.stepAtSeconds,
+        'mvBefore': r.mvBefore,
+        'mvAfter': r.mvAfter,
+        'baselineSlopePctPerSecond': r.baselineSlopePctPerSecond,
+        'baselinePvAtStep': r.baselinePvAtStep,
+        'rSquared': r.rSquared,
+        'nrmse': r.normalizedRmse,
+        'fittedPoints': r.fittedPoints,
+        'suitableForTuning': r.suitableForTuning,
+        'fileName': fileName,
+        'mvSpanHigh': double.parse(mvHigh.text.replaceAll(',', '.')),
+        'pvSpanHigh': double.parse(pvHigh.text.replaceAll(',', '.')),
+      },
+      originalCsv: csv.text,
+    ));
   }
 
   void acceptManual(ManualStepEstimate estimate) {
@@ -378,7 +484,11 @@ class _WebStepTestState extends State<WebStepTest> {
           )],
         ),
         const SizedBox(height: 14),
-        if (manualMode)
+        if (widget.settings.acquisition == StepAcquisition.manualIntegratingSlope)
+          IntegratingManualForm(
+            onAccept: acceptIntegratingManual,
+          )
+        else if (manualMode)
           ManualStepForm(
             key: ValueKey(settings.acquisition.name),
             initialMethod:
@@ -415,6 +525,36 @@ class _WebStepTestState extends State<WebStepTest> {
           FilledButton(
             onPressed: identify,
             child: const Text('Идентифицировать по CSV')),
+          if (integratingFit != null) ...[
+            const SizedBox(height: 12),
+            Text('Ki = ' +
+              integratingFit!.plant.gainPerSecond.toStringAsFixed(6) +
+              ' 1/с, L = ' +
+              integratingFit!.plant.delaySeconds.toStringAsFixed(2) + ' с',
+              style: Theme.of(context).textTheme.titleMedium),
+            Text('Начальный наклон PV: ' +
+              integratingFit!.baselineSlopePctPerSecond.toStringAsFixed(5) +
+              ' %/с. R² = ' +
+              integratingFit!.rSquared.toStringAsFixed(3) +
+              ', NRMSE = ' +
+              integratingFit!.normalizedRmse.toStringAsFixed(3)),
+            Text(integratingFit!.suitableForTuning
+              ? 'Подходящее качество IPDT-приближения. '
+                'Проверьте линейность и безопасные границы процесса.'
+              : 'Недостаточное качество; PI будет заблокирован. '
+                'Можно сохранить данные для последующей проверки.'),
+            FilledButton.icon(
+              key: const Key('integrating-csv-save'),
+              onPressed: saving ? null : acceptIntegratingCsv,
+              icon: const Icon(Icons.save_outlined),
+              label: const Text('Сохранить IPDT Step Test')),
+            const SizedBox(height: 12),
+            const Text('Интегрирующий отклик PV · измерение / модель'),
+            SizedBox(height: 220,
+              child: CustomPaint(
+                painter: _WebCsvPlot(measured!, fitted!),
+                child: const SizedBox.expand())),
+          ],
           if (fit != null) ...[
             const SizedBox(height: 12),
             Text('K = ' + fit!.plant.gain.toStringAsFixed(4) +
@@ -479,9 +619,15 @@ class _WebStepTestState extends State<WebStepTest> {
               title: Text(((row['settings'] as Map)['tag'] as String) +
                 ' · ' + (row['source'] as String)),
               subtitle: Text(
-                'K=' + ((row['model'] as Map)['K'] as num).toStringAsFixed(3) +
-                ' T=' + ((row['model'] as Map)['T'] as num).toStringAsFixed(2) +
-                ' с L=' + ((row['model'] as Map)['L'] as num).toStringAsFixed(2) +
+                ((row['model'] as Map)['type'] == 'IPDT'
+                  ? 'Ki=' + ((row['model'] as Map)['KiPerSecond'] as num)
+                    .toStringAsFixed(6) + ' 1/с'
+                  : 'K=' + ((row['model'] as Map)['K'] as num)
+                    .toStringAsFixed(3) +
+                    ' T=' + ((row['model'] as Map)['T'] as num)
+                    .toStringAsFixed(2) + ' с') +
+                ' L=' + ((row['model'] as Map)['L'] as num)
+                  .toStringAsFixed(2) +
                 ' с | ' + (row['savedAt'] as String)),
             )),
         ],
