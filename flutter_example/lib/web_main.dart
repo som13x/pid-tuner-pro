@@ -14,6 +14,7 @@ import 'manual_step_form.dart';
 import 'integrating_manual_form.dart';
 import 'step_settings_screen.dart';
 import 'step_web_database.dart';
+import 'tuning_calculation_screen.dart';
 
 /// Safari Step Test. Native DCS control and other lab screens remain excluded.
 /// Settings and identification evidence use the browser's own IndexedDB.
@@ -25,12 +26,33 @@ class PidTunerWebPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'PID Tuner Pro · Step Test',
+    title: 'PID Tuner Pro',
     debugShowCheckedModeBanner: false,
     theme: ThemeData(
       useMaterial3: true,
-      colorSchemeSeed: Colors.teal,
-      brightness: Brightness.light,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: const Color(0xFF176C80),
+        brightness: Brightness.light,
+      ),
+      scaffoldBackgroundColor: const Color(0xFFF5F7FA),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Color(0xFFF5F7FA),
+        centerTitle: false,
+      ),
+      cardTheme: CardThemeData(
+        elevation: 0,
+        color: Colors.white,
+        margin: const EdgeInsets.symmetric(vertical: 6),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: Color(0xFFE1E7ED)),
+        ),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: Colors.white,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      ),
     ),
     home: WebPreviewHome(database: database),
   );
@@ -49,6 +71,7 @@ class _WebPreviewHomeState extends State<WebPreviewHome> {
   bool ownsDatabase = false;
   bool loading = true;
   int selectedTab = 0; // Settings must precede Step Test.
+  int stepDraft = 1;
   String? error;
   StepTestSettings? settings;
   List<Map<String, dynamic>> results = const [];
@@ -114,7 +137,8 @@ class _WebPreviewHomeState extends State<WebPreviewHome> {
     }
     return Scaffold(
       appBar: AppBar(
-        title: const Text('PID Tuner Pro'),
+        title: const Text('PID Tuner Pro',
+          style: TextStyle(fontWeight: FontWeight.w700)),
         backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
       ),
       body: SafeArea(child: Column(children: [
@@ -123,17 +147,25 @@ class _WebPreviewHomeState extends State<WebPreviewHome> {
           child: Row(children: [
             Expanded(child: ChoiceChip(
               key: const Key('top-settings'),
-              label: const Center(child: Text('1. Settings')),
+              label: const Center(child: Text('Settings', maxLines: 1)),
               selected: selectedTab == 0,
               onSelected: (_) => setState(() => selectedTab = 0),
             )),
             const SizedBox(width: 12),
             Expanded(child: ChoiceChip(
               key: const Key('top-step-test'),
-              label: const Center(child: Text('2. Step Test')),
+              label: const Center(child: Text('Step Test', maxLines: 1)),
               selected: selectedTab == 1,
               onSelected: settings == null ? null
                 : (_) => setState(() => selectedTab = 1),
+            )),
+            const SizedBox(width: 6),
+            Expanded(child: ChoiceChip(
+              key: const Key('top-tuning-calculation'),
+              label: const Center(child: Text('Tuning', maxLines: 1)),
+              selected: selectedTab == 2,
+              onSelected: settings == null ? null
+                : (_) => setState(() => selectedTab = 2),
             )),
           ]),
         ),
@@ -152,12 +184,16 @@ class _WebPreviewHomeState extends State<WebPreviewHome> {
               )
             : settings == null
               ? const Center(child: Text('Сначала заполните Settings'))
-              : WebStepTest(
-                  key: ValueKey(settings!.toJson().toString()),
+              : selectedTab == 2
+                ? TuningCalculationScreen(
+                    settings: settings!, database: db, results: results)
+                : WebStepTest(
+                  key: ValueKey('${settings!.toJson()}-$stepDraft'),
                   settings: settings!,
                   database: db,
                   results: results,
                   onResultSaved: refreshResults,
+                  onNewStepTest: () => setState(() => stepDraft++),
                 ),
         ),
       ])),
@@ -170,6 +206,7 @@ class WebStepTest extends StatefulWidget {
   final StepWebDatabase database;
   final List<Map<String, dynamic>> results;
   final Future<void> Function() onResultSaved;
+  final VoidCallback? onNewStepTest;
 
   const WebStepTest({
     super.key,
@@ -177,6 +214,7 @@ class WebStepTest extends StatefulWidget {
     required this.database,
     required this.results,
     required this.onResultSaved,
+    this.onNewStepTest,
   });
 
   @override
@@ -469,6 +507,16 @@ class _WebStepTestState extends State<WebStepTest> {
       children: [
         Text('Step Test · ' + settings.tag,
           style: Theme.of(context).textTheme.titleLarge),
+        const SizedBox(height: 8),
+        Text('Сохранено испытаний: ${widget.results.where((r) => (r['settings'] as Map?)?['tag'] == settings.tag).length}',
+          style: Theme.of(context).textTheme.bodyMedium),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          key: const Key('add-step-test'),
+          onPressed: widget.onNewStepTest,
+          icon: const Icon(Icons.add),
+          label: const Text('Add Step Test'),
+        ),
         const SizedBox(height: 8),
         Text(settings.profile.vendor + ' · ' + settings.profile.system +
           ' · ' + settings.controlledVariable.title),
