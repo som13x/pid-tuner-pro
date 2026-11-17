@@ -27,11 +27,11 @@ class LoopScenario {
 }
 
 class LoopPoint {
-  final double t, sp, pv, mv, disturbance;
+  final double t, sp, pv, mv, disturbance, filteredPv;
   final ControllerMode mode;
   final bool saturated, rateLimited;
   const LoopPoint(this.t, this.sp, this.pv, this.mv, this.disturbance,
-      this.mode, this.saturated, this.rateLimited);
+      this.mode, this.saturated, this.rateLimited, this.filteredPv);
 }
 
 class LoopMetrics {
@@ -101,7 +101,7 @@ class ClosedLoopStudio {
       }
       maxError = math.max(maxError, error.abs());
       points.add(LoopPoint(t, sp, pv, snap.mv, disturbance,
-          mode, snap.saturated, snap.rateLimited));
+          mode, snap.saturated, snap.rateLimited, snap.filteredPv));
       lastMv = snap.mv;
       history.add(snap.mv);
       if (k == count) break;
@@ -132,5 +132,6 @@ class ClosedLoopStudio {
           dt: config.dt, mvMin: config.mvMin, mvMax: config.mvMax,
           maxMvRate: config.maxMvRate,
           derivativeFilterSeconds: config.derivativeFilterSeconds,
+          pvFilterSeconds: config.pvFilterSeconds,
           structure: structure, action: config.action), scenario)).toList();
 }

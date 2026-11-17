@@ -10,7 +10,10 @@ import 'package:pid_tuner_pro_core/closed_loop_studio.dart';
 List<Map<String, dynamic>> _simulateWorker(Map<String, double> p) {
   final plant = Plant(gain: p['k']!, tau: p['tau']!, delay: p['delay']!);
   final config = CentumPidConfig(pb: p['pb']!, ti: p['ti']!, td: p['td']!,
-    dt: 0.2, maxMvRate: p['rate']!);
+    dt: 0.2, maxMvRate: p['rate']!,
+    pvFilterSeconds: p['pvFilter']!,
+    derivativeFilterSeconds: p['dFilter']!,
+    action: p['action']! > 0 ? ControllerAction.reverse : ControllerAction.direct);
   final scenario = LoopScenario(duration: p['duration']!, dt: 0.2,
     disturbanceAt: p['disturbanceAt']!, disturbanceMagnitude: p['disturbance']!,
     manualUntil: p['manualUntil']!, manualMv: 50);
@@ -19,7 +22,7 @@ List<Map<String, dynamic>> _simulateWorker(Map<String, double> p) {
     'iae': run.metrics.iae, 'maxError': run.metrics.maxAbsError,
     'travel': run.metrics.totalMvTravel, 'rate': run.metrics.maxObservedMvRate,
     'finalError': run.metrics.finalError,
-    'points': run.points.map((pt) => [pt.t, pt.sp, pt.pv, pt.mv]).toList(),
+    'points': run.points.map((pt) => [pt.t, pt.sp, pt.pv, pt.mv, pt.filteredPv]).toList(),
   }).toList();
 }
 
@@ -37,7 +40,9 @@ class _SimulationScreenState extends State<SimulationScreen> {
   String? error;
   bool busy = false;
   bool showMv = false;
+  bool showFilteredPv = false;
   String algorithm = 'compare';
+  String actionSelection = 'auto';
   @override
   void initState() {
     super.initState();
@@ -45,6 +50,7 @@ class _SimulationScreenState extends State<SimulationScreen> {
     final values = <String, double>{
       'k': m?['K'] ?? 1, 'tau': m?['T'] ?? 15, 'delay': m?['L'] ?? 3,
       'pb': 120, 'ti': 20, 'td': 0, 'rate': 5,
+      'pvFilter': 0, 'dFilter': 1,
       'duration': 240, 'disturbanceAt': 40, 'disturbance': 6,
       'manualUntil': 0,
     };
@@ -64,10 +70,16 @@ class _SimulationScreenState extends State<SimulationScreen> {
     if (inputs['duration']! > 1800 || inputs['duration']! < 1 ||
         inputs['tau']! <= 0 || inputs['pb']! <= 0 || inputs['ti']! <= 0 ||
         inputs['delay']! < 0 || inputs['td']! < 0 || inputs['rate']! <= 0 ||
+        inputs['pvFilter']! < 0 || inputs['dFilter']! <= 0 ||
         inputs['manualUntil']! < 0 || inputs['manualUntil']! > inputs['duration']! ||
         inputs['disturbanceAt']! < 0 || inputs['tau']! < 0.4) {
-      setState(() => error = 'Проверьте диапазоны: T ≥ 0.4 с, время 1–1800 с, PB/Ti > 0'); return;
+      setState(() => error = 'Проверьте диапазоны: T ≥ 0.4 с, время 1–1800 с, PB/Ti > 0; PV фильтр ≥ 0, D фильтр > 0'); return;
     }
+    // Automatic direction is only a default for the synthetic process model.
+    // Final action requires verification against physical valve action.
+    inputs['action'] = actionSelection == 'auto'
+      ? (inputs['k']! > 0 ? 1.0 : -1.0)
+      : (actionSelection == 'reverse' ? 1.0 : -1.0);
     setState(() { busy = true; error = null; results = null; });
     try {
       final r = await compute(_simulateWorker, inputs);
@@ -96,11 +108,30 @@ class _SimulationScreenState extends State<SimulationScreen> {
       Wrap(spacing: 10, runSpacing: 12, children: [
         field('k', 'K (%/% )'), field('tau', 'T, с'), field('delay', 'L, с'),
         field('pb', 'PB, %'), field('ti', 'Ti, с'), field('td', 'Td, с'),
+        field('pvFilter', 'PV-фильтр, с (0=выкл)'),
+        field('dFilter', 'D-фильтр, с'),
         field('rate', 'Макс. MV, %/с'), field('duration', 'Длительность, с'),
         field('disturbanceAt', 'Возмущение с, с'), field('disturbance', 'Возмущение, %'),
         field('manualUntil', 'MAN до, с'),
       ]),
+      const SizedBox(height: 8),
+      const Text('PV-фильтр: инерционное звено 1-го порядка перед расчётом P/I/D. '
+          'Уменьшает шум, но добавляет запаздывание и может ухудшить регулирование. '
+          'Нулевое значение отключает фильтрацию.'),
       const SizedBox(height: 14),
+      DropdownButtonFormField<String>(
+        value: actionSelection,
+        decoration: const InputDecoration(labelText: 'Направление действия регулятора'),
+        items: const [
+          DropdownMenuItem(value: 'auto', child: Text('По знаку K (проверить на объекте)')),
+          DropdownMenuItem(value: 'reverse', child: Text('Reverse action')),
+          DropdownMenuItem(value: 'direct', child: Text('Direct action')),
+        ],
+        onChanged: busy ? null : (value) {
+          if (value != null) setState(() => actionSelection = value);
+        },
+      ),
+      const SizedBox(height: 12),
       DropdownButtonFormField<String>(
         value: algorithm,
         decoration: const InputDecoration(labelText: 'Структура алгоритма'),
@@ -139,8 +170,14 @@ class _SimulationScreenState extends State<SimulationScreen> {
         ])).toList())),
         SwitchListTile(title: Text(showMv ? 'График MV' : 'График PV / SP'),
           value: showMv, onChanged: (v) => setState(() => showMv = v)),
+        if (!showMv) SwitchListTile(
+          title: const Text('Показывать PV после фильтра вместо измеренной PV'),
+          subtitle: const Text('Показатели IAE и ошибка рассчитываются по измеренной PV'),
+          value: showFilteredPv,
+          onChanged: (v) => setState(() => showFilteredPv = v)),
         SizedBox(height: 320, child: Card(child: Padding(padding: const EdgeInsets.all(12),
-          child: CustomPaint(painter: _SimulationPainter(visibleResults, showMv))))),
+          child: CustomPaint(painter: _SimulationPainter(visibleResults, showMv,
+            showFilteredPv))))),
         const SizedBox(height: 10),
         const Text('Сигналы нормированы в % шкалы. Возмущение добавляется к PV. '
           'Расчёт является приближённой моделью, не эмулятором PID-блоков Yokogawa, Siemens или ABB.'),
@@ -153,14 +190,15 @@ class _SimulationScreenState extends State<SimulationScreen> {
 class _SimulationPainter extends CustomPainter {
   final List<Map<String, dynamic>> runs;
   final bool mv;
-  _SimulationPainter(this.runs, this.mv);
+  final bool filteredPv;
+  _SimulationPainter(this.runs, this.mv, this.filteredPv);
   @override
   void paint(Canvas canvas, Size size) {
     final area = Rect.fromLTWH(44, 16, math.max(1, size.width - 60), math.max(1, size.height - 50));
     final sets = runs.map((r) => (r['points'] as List).cast<List>()).toList();
     final all = sets.expand((e) => e).toList();
     if (all.length < 2) return;
-    final index = mv ? 3 : 2;
+    final index = mv ? 3 : (filteredPv ? 4 : 2);
     final values = all.map((e) => (e[index] as num).toDouble()).toList();
     if (!mv) values.addAll(all.map((e) => (e[1] as num).toDouble()));
     var lo = values.reduce(math.min), hi = values.reduce(math.max);
@@ -197,5 +235,6 @@ class _SimulationPainter extends CustomPainter {
     }
   }
   @override
-  bool shouldRepaint(covariant _SimulationPainter old) => old.mv != mv || old.runs != runs;
+  bool shouldRepaint(covariant _SimulationPainter old) => old.mv != mv ||
+    old.filteredPv != filteredPv || old.runs != runs;
 }

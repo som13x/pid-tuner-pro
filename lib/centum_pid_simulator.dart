@@ -9,12 +9,15 @@ enum ControllerAction { reverse, direct }
 class CentumPidConfig {
   final double pb, ti, td, dt, mvMin, mvMax, maxMvRate;
   final double derivativeFilterSeconds;
+  /// First-order low-pass on PV before P, I and D calculations. 0 disables.
+  final double pvFilterSeconds;
   final PidStructure structure;
   final ControllerAction action;
   const CentumPidConfig({
     required this.pb, required this.ti, this.td = 0, this.dt = 0.1,
     this.mvMin = 0, this.mvMax = 100, this.maxMvRate = double.infinity,
     this.derivativeFilterSeconds = 1,
+    this.pvFilterSeconds = 0,
     this.structure = PidStructure.pid,
     this.action = ControllerAction.reverse,
   });
@@ -23,18 +26,20 @@ class CentumPidConfig {
         !td.isFinite || td < 0 || !dt.isFinite || dt <= 0 ||
         !mvMin.isFinite || !mvMax.isFinite || mvMin >= mvMax ||
         maxMvRate.isNaN || maxMvRate <= 0 ||
-        !derivativeFilterSeconds.isFinite || derivativeFilterSeconds <= 0) {
+        !derivativeFilterSeconds.isFinite || derivativeFilterSeconds <= 0 ||
+        !pvFilterSeconds.isFinite || pvFilterSeconds < 0) {
       throw ArgumentError('Invalid PID configuration');
     }
   }
 }
 
 class PidSnapshot {
-  final double mv, requestedMv, p, i, d, error;
+  final double mv, requestedMv, p, i, d, error, filteredPv;
   final bool saturated, rateLimited;
   final ControllerMode mode;
   const PidSnapshot(this.mv, this.requestedMv, this.p, this.i, this.d,
-      this.error, this.saturated, this.rateLimited, this.mode);
+      this.error, this.saturated, this.rateLimited, this.mode,
+      this.filteredPv);
 }
 
 /// Discrete positional PID, conditional anti-windup, filtered derivative,
@@ -44,6 +49,8 @@ class PidSnapshot {
 class CentumPidSimulator {
   final CentumPidConfig config;
   late double _mv, _integral, _previousPv, _previousError, _filteredD;
+  double _filteredPv = 0;
+  bool _pvFilterInitialized = false;
   bool _initialized = false;
   ControllerMode _mode = ControllerMode.manual;
 
@@ -66,14 +73,26 @@ class CentumPidSimulator {
       throw ArgumentError('Non-finite controller input');
     }
     final c = config;
+    // The first sample initializes the filter at measured PV. This avoids
+    // introducing an artificial start-up error from an assumed 0% PV.
+    if (!_pvFilterInitialized) {
+      _filteredPv = pv;
+      _pvFilterInitialized = true;
+    } else if (c.pvFilterSeconds == 0) {
+      _filteredPv = pv;
+    } else {
+      final pvAlpha = math.exp(-c.dt / c.pvFilterSeconds);
+      _filteredPv = pvAlpha * _filteredPv + (1 - pvAlpha) * pv;
+    }
+    final usedPv = _filteredPv;
     final sign = c.action == ControllerAction.reverse ? 1.0 : -1.0;
-    final error = sign * (sp - pv);
+    final error = sign * (sp - usedPv);
     final kp = 100 / c.pb;
-    final pInput = c.structure == PidStructure.iPd ? -sign * pv : error;
+    final pInput = c.structure == PidStructure.iPd ? -sign * usedPv : error;
     final p = kp * pInput;
-    final derivativeInput = c.structure == PidStructure.pid ? error : -sign * pv;
+    final derivativeInput = c.structure == PidStructure.pid ? error : -sign * usedPv;
     if (!_initialized) {
-      _previousPv = pv;
+      _previousPv = usedPv;
       _previousError = error;
       _initialized = true;
     }
@@ -84,7 +103,7 @@ class CentumPidSimulator {
     final alpha = math.exp(-c.dt / c.derivativeFilterSeconds);
     _filteredD = alpha * _filteredD + (1 - alpha) * rawDerivative;
     final d = c.td == 0 ? 0.0 : _filteredD;
-    _previousPv = pv;
+    _previousPv = usedPv;
     _previousError = error;
 
     if (mode == ControllerMode.manual) {
@@ -93,13 +112,17 @@ class CentumPidSimulator {
       _integral = _mv - p - d; // track manual output for bumpless transfer
       _mode = mode;
       return PidSnapshot(_mv, target, p, _integral, d, error,
-          false, false, mode);
+          false, false, mode, usedPv);
     }
-    if (_mode != ControllerMode.auto) {
+    final enteringAuto = _mode != ControllerMode.auto;
+    if (enteringAuto) {
+      // Track the actual manual output against the CURRENT P and D terms.
+      // Do not integrate on the transfer scan: first AUTO MV remains exactly
+      // the same even if SP/PV changed while in MAN.
       _integral = _mv - p - d;
     }
     _mode = mode;
-    final increment = kp / c.ti * error * c.dt;
+    final increment = enteringAuto ? 0.0 : kp / c.ti * error * c.dt;
     final proposedI = _integral + increment;
     final requested = p + proposedI + d;
     final bounded = requested.clamp(c.mvMin, c.mvMax).toDouble();
@@ -115,6 +138,6 @@ class CentumPidSimulator {
     _mv = next;
     return PidSnapshot(_mv, requested, p, _integral, d, error,
         (bounded - requested).abs() > 1e-9,
-        (bounded - next).abs() > 1e-9, mode);
+        (bounded - next).abs() > 1e-9, mode, usedPv);
   }
 }
