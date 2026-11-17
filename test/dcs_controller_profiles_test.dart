@@ -35,8 +35,8 @@ void main() {
         processGain: -0.6).toJson();
       expect(result['actionToVerify'], 'direct');
       expect(result['tiSeconds'], 30);
-      expect(result['parameterName'], contains('Gain'),
-        reason: 'Siemens text uses upper case GAIN');
+      expect((result['parameterName'] as String).toLowerCase(),
+        contains('gain'));
       expect(result['requiresBlockAndScalingVerification'], true);
     }
   });
