@@ -14,6 +14,7 @@ import 'manual_step_form.dart';
 import 'integrating_manual_form.dart';
 import 'step_settings_screen.dart';
 import 'step_web_database.dart';
+import 'tuning_calculation_screen.dart';
 
 /// Safari Step Test. Native DCS control and other lab screens remain excluded.
 /// Settings and identification evidence use the browser's own IndexedDB.
@@ -49,6 +50,7 @@ class _WebPreviewHomeState extends State<WebPreviewHome> {
   bool ownsDatabase = false;
   bool loading = true;
   int selectedTab = 0; // Settings must precede Step Test.
+  int stepDraft = 1;
   String? error;
   StepTestSettings? settings;
   List<Map<String, dynamic>> results = const [];
@@ -135,6 +137,14 @@ class _WebPreviewHomeState extends State<WebPreviewHome> {
               onSelected: settings == null ? null
                 : (_) => setState(() => selectedTab = 1),
             )),
+            const SizedBox(width: 6),
+            Expanded(child: ChoiceChip(
+              key: const Key('top-tuning-calculation'),
+              label: const Center(child: Text('3. Tuning', maxLines: 1)),
+              selected: selectedTab == 2,
+              onSelected: settings == null ? null
+                : (_) => setState(() => selectedTab = 2),
+            )),
           ]),
         ),
         if (error != null)
@@ -152,12 +162,16 @@ class _WebPreviewHomeState extends State<WebPreviewHome> {
               )
             : settings == null
               ? const Center(child: Text('Сначала заполните Settings'))
-              : WebStepTest(
-                  key: ValueKey(settings!.toJson().toString()),
+              : selectedTab == 2
+                ? TuningCalculationScreen(
+                    settings: settings!, database: db, results: results)
+                : WebStepTest(
+                  key: ValueKey('${settings!.toJson()}-$stepDraft'),
                   settings: settings!,
                   database: db,
                   results: results,
                   onResultSaved: refreshResults,
+                  onNewStepTest: () => setState(() => stepDraft++),
                 ),
         ),
       ])),
@@ -170,6 +184,7 @@ class WebStepTest extends StatefulWidget {
   final StepWebDatabase database;
   final List<Map<String, dynamic>> results;
   final Future<void> Function() onResultSaved;
+  final VoidCallback onNewStepTest;
 
   const WebStepTest({
     super.key,
@@ -177,6 +192,7 @@ class WebStepTest extends StatefulWidget {
     required this.database,
     required this.results,
     required this.onResultSaved,
+    required this.onNewStepTest,
   });
 
   @override
@@ -469,6 +485,13 @@ class _WebStepTestState extends State<WebStepTest> {
       children: [
         Text('Step Test · ' + settings.tag,
           style: Theme.of(context).textTheme.titleLarge),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          key: const Key('add-step-test'),
+          onPressed: widget.onNewStepTest,
+          icon: const Icon(Icons.add),
+          label: const Text('+ Add Step Test (новый замер)'),
+        ),
         const SizedBox(height: 8),
         Text(settings.profile.vendor + ' · ' + settings.profile.system +
           ' · ' + settings.controlledVariable.title),
