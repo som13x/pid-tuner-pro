@@ -63,7 +63,7 @@ void main() {
   });
 
   test('RL1 is a monitored signal, not an undeclared controller reset input', () {
-    const config = CascadeCircuitConfig(duration: 80);
+    const config = CascadeCircuitConfig(duration: 80, flowDisturbanceAt: 40);
     final base = CircuitWiring([CircuitWiring.cascade]);
     final monitored = CircuitWiring([
       CircuitWiring.cascade, CircuitWiring.pvToLag,
@@ -98,7 +98,7 @@ void main() {
       const CascadeCircuitConfig(
         flow: Plant(gain: -0.7, tau: 5, delay: 1),
         temperature: Plant(gain: -0.6, tau: 17, delay: 3),
-        duration: 80),
+        duration: 80, flowDisturbanceAt: 40),
       CircuitWiring([CircuitWiring.cascade]));
     expect(run.points.every((p) => p.ticPv.isFinite &&
       p.ficPv.isFinite && p.ficMv.isFinite), isTrue);
