@@ -124,9 +124,12 @@ void main() {
     final db = StepWebDatabase(factory: newIdbFactoryMemory());
     await tester.pumpWidget(MaterialApp(home: WebPreviewHome(database: db)));
     await tester.pumpAndSettle();
-    final vendorField = tester.widget<DropdownButtonFormField<String>>(
-      find.byKey(const Key('settings-system')));
-    expect(vendorField.items, hasLength(5));
+    final vendorDropdown = tester.widget<DropdownButton<String>>(
+      find.descendant(
+        of: find.byKey(const Key('settings-system')),
+        matching: find.byType(DropdownButton<String>),
+      ));
+    expect(vendorDropdown.items, hasLength(5));
     expect(find.text('5. Рекомендуемый метод расчёта PI'), findsOneWidget);
     expect(find.text('IMC / Lambda (консервативный PI)'), findsWidgets);
     db.close();
