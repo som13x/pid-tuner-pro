@@ -15,6 +15,7 @@ import 'project_backup.dart';
 import 'model_history_screen.dart';
 import 'simulation_screen.dart';
 import 'dual_valve_screen.dart';
+import 'rl_tracking_screen.dart';
 
 class ProjectHome extends StatefulWidget {
   const ProjectHome({super.key});
@@ -321,6 +322,9 @@ class _ProjectHomeState extends State<ProjectHome> {
                   child: const Text('Simulation')),
                 OutlinedButton(onPressed: () => _open(DualValveScreen(loopTag: p.tag)),
                   child: const Text('Dual-Valve LNG')),
+                OutlinedButton(onPressed: () => _open(RlTrackingScreen(
+                  initialModel: p.identifiedModel, loopTag: p.tag)),
+                  child: const Text('RL / Tracking Lab')),
                 IconButton(tooltip: 'Удалить контур', onPressed: () => _remove(p), icon: const Icon(Icons.delete_outline)),
               ]),
               if (p.identifiedModel == null) const Padding(padding: EdgeInsets.all(8),

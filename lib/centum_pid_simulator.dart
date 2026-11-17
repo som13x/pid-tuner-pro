@@ -11,6 +11,9 @@ class CentumPidConfig {
   final double derivativeFilterSeconds;
   /// First-order low-pass on PV before P, I and D calculations. 0 disables.
   final double pvFilterSeconds;
+  /// Back-calculation tracking time in seconds. Zero disables external reset.
+  /// This is a generic model, not CENTUM VP RL1/RL2 implementation.
+  final double externalTrackingTimeSeconds;
   final PidStructure structure;
   final ControllerAction action;
   const CentumPidConfig({
@@ -18,6 +21,7 @@ class CentumPidConfig {
     this.mvMin = 0, this.mvMax = 100, this.maxMvRate = double.infinity,
     this.derivativeFilterSeconds = 1,
     this.pvFilterSeconds = 0,
+    this.externalTrackingTimeSeconds = 0,
     this.structure = PidStructure.pid,
     this.action = ControllerAction.reverse,
   });
@@ -27,7 +31,10 @@ class CentumPidConfig {
         !mvMin.isFinite || !mvMax.isFinite || mvMin >= mvMax ||
         maxMvRate.isNaN || maxMvRate <= 0 ||
         !derivativeFilterSeconds.isFinite || derivativeFilterSeconds <= 0 ||
-        !pvFilterSeconds.isFinite || pvFilterSeconds < 0) {
+        !pvFilterSeconds.isFinite || pvFilterSeconds < 0 ||
+        !externalTrackingTimeSeconds.isFinite ||
+        externalTrackingTimeSeconds < 0 ||
+        (externalTrackingTimeSeconds > 0 && externalTrackingTimeSeconds < dt)) {
       throw ArgumentError('Invalid PID configuration');
     }
   }
@@ -68,11 +75,24 @@ class CentumPidSimulator {
   ControllerMode get mode => _mode;
 
   PidSnapshot step({required double sp, required double pv,
-      required ControllerMode mode, double? manualMv}) {
-    if (!sp.isFinite || !pv.isFinite || (manualMv != null && !manualMv.isFinite)) {
+      required ControllerMode mode, double? manualMv,
+      double? externalTrackingMv}) {
+    if (!sp.isFinite || !pv.isFinite || (manualMv != null && !manualMv.isFinite) ||
+        (externalTrackingMv != null && !externalTrackingMv.isFinite)) {
       throw ArgumentError('Non-finite controller input');
     }
     final c = config;
+    if (mode == ControllerMode.auto && c.externalTrackingTimeSeconds > 0 &&
+        externalTrackingMv == null) {
+      throw ArgumentError('External tracking requires measured actuator MV');
+    }
+    if (externalTrackingMv != null && c.externalTrackingTimeSeconds == 0) {
+      throw ArgumentError('External tracking is disabled in this configuration');
+    }
+    if (externalTrackingMv != null &&
+        (externalTrackingMv < c.mvMin || externalTrackingMv > c.mvMax)) {
+      throw ArgumentError('External tracking MV outside configured limits');
+    }
     // The first sample initializes the filter at measured PV. This avoids
     // introducing an artificial start-up error from an assumed 0% PV.
     if (!_pvFilterInitialized) {
@@ -134,6 +154,16 @@ class CentumPidSimulator {
     // achievable MV. This is a simplified conditional anti-windup scheme.
     if (!constrained || increment * (requested - next) < 0) {
       _integral = proposedI;
+    }
+    // Optional external tracking follows the ACTUAL downstream actuator
+    // output, not an arbitrary RL input or process PV. The correction is
+    // applied to the NEXT scan's integral state, avoiding an instantaneous
+    // jump in this scan's MV. Do not identify this simplified back-
+    // calculation law with any manufacturer-specific reset algorithm.
+    if (!enteringAuto && c.externalTrackingTimeSeconds > 0) {
+      final correction = c.dt / c.externalTrackingTimeSeconds *
+          (externalTrackingMv! - next);
+      _integral += correction;
     }
     _mv = next;
     return PidSnapshot(_mv, requested, p, _integral, d, error,
