@@ -11,6 +11,7 @@ class StepWebDatabase {
   static const databaseName = 'pid-tuner-pro-step-test';
   static const _settingsStore = 'settings';
   static const _resultsStore = 'identifications';
+  static const _tuningStore = 'tuning_calculations';
 
   final IdbFactory factory;
   Database? _database;
@@ -22,7 +23,7 @@ class StepWebDatabase {
     if (_database != null) return;
     _database = await factory.open(
       databaseName,
-      version: 1,
+      version: 2,
       onUpgradeNeeded: (event) {
         final db = event.database;
         if (!db.objectStoreNames.contains(_settingsStore)) {
@@ -30,6 +31,9 @@ class StepWebDatabase {
         }
         if (!db.objectStoreNames.contains(_resultsStore)) {
           db.createObjectStore(_resultsStore, autoIncrement: true);
+        }
+        if (!db.objectStoreNames.contains(_tuningStore)) {
+          db.createObjectStore(_tuningStore, autoIncrement: true);
         }
       },
     );
@@ -148,6 +152,35 @@ class StepWebDatabase {
     await open();
     final tx = _db.transaction(_resultsStore, idbModeReadOnly);
     final rows = await tx.objectStore(_resultsStore).getAll();
+    await tx.completed;
+    return rows.reversed.map((raw) =>
+      Map<String, dynamic>.from(raw as Map)).toList(growable: false);
+  }
+
+  /// Append-only tuning history, preserving the exact Settings and model.
+  Future<void> saveTuningCalculation({
+    required StepTestSettings settings,
+    required Map<String, dynamic> sourceResult,
+    required StepPiEstimate estimate,
+  }) async {
+    await open();
+    final tx = _db.transaction(_tuningStore, idbModeReadWrite);
+    await tx.objectStore(_tuningStore).add(<String, Object?>{
+      'savedAt': DateTime.now().toUtc().toIso8601String(),
+      'settings': settings.toJson(),
+      'sourceSavedAt': sourceResult['savedAt'],
+      'source': sourceResult['source'],
+      'model': sourceResult['model'],
+      'piEstimate': estimate.toJson(),
+      'verifiedForDcsDeployment': false,
+    });
+    await tx.completed;
+  }
+
+  Future<List<Map<String, dynamic>>> getTuningCalculations() async {
+    await open();
+    final tx = _db.transaction(_tuningStore, idbModeReadOnly);
+    final rows = await tx.objectStore(_tuningStore).getAll();
     await tx.completed;
     return rows.reversed.map((raw) =>
       Map<String, dynamic>.from(raw as Map)).toList(growable: false);
