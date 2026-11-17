@@ -6,6 +6,7 @@ import 'package:pid_tuner_pro_core/dcs_controller_profiles.dart';
 import 'package:pid_tuner_pro_core/step_test_settings.dart';
 import 'package:pid_tuner_pro_demo/step_web_database.dart';
 import 'package:pid_tuner_pro_demo/web_main.dart';
+import 'fake_step_web_database.dart';
 
 StepTestSettings example({
   String? profile,
@@ -105,7 +106,7 @@ void main() {
 
   testWidgets('Settings is the first tab, Step Test locked until saved',
       (tester) async {
-    final db = StepWebDatabase(factory: newIdbFactoryMemory());
+    final db = FakeStepWebDatabase();
     await tester.pumpWidget(MaterialApp(home: WebPreviewHome(database: db)));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('top-settings')), findsOneWidget);
@@ -121,7 +122,7 @@ void main() {
 
   testWidgets('Settings exposes five DCS, process, tuning and step methods',
       (tester) async {
-    final db = StepWebDatabase(factory: newIdbFactoryMemory());
+    final db = FakeStepWebDatabase();
     await tester.pumpWidget(MaterialApp(home: WebPreviewHome(database: db)));
     await tester.pumpAndSettle();
     final vendorDropdown = tester.widget<DropdownButton<String>>(
@@ -137,8 +138,8 @@ void main() {
 
   testWidgets('saved CSV selection leads to Step Test with no other labs',
       (tester) async {
-    final db = StepWebDatabase(factory: newIdbFactoryMemory());
-    await db.saveSettings(example(method: StepAcquisition.csvTrend));
+    final db = FakeStepWebDatabase(
+      configuration: example(method: StepAcquisition.csvTrend));
     await tester.pumpWidget(MaterialApp(home: WebPreviewHome(database: db)));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('top-step-test')));
@@ -157,8 +158,8 @@ void main() {
 
   testWidgets('saved two-point selection configures manual Step Test',
       (tester) async {
-    final db = StepWebDatabase(factory: newIdbFactoryMemory());
-    await db.saveSettings(example(method: StepAcquisition.manualTwoPoints));
+    final db = FakeStepWebDatabase(
+      configuration: example(method: StepAcquisition.manualTwoPoints));
     await tester.pumpWidget(MaterialApp(home: WebPreviewHome(database: db)));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('top-step-test')));
