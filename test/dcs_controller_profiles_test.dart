@@ -4,7 +4,7 @@ import 'package:pid_tuner_pro_core/dcs_controller_profiles.dart';
 void main() {
   test('five supported, uniquely identified profiles', () {
     expect(DcsProfiles.all, hasLength(5));
-    expect(DcsProfiles.all.map((p) => p.id).toSet(), hasLength(3));
+    expect(DcsProfiles.all.map((p) => p.id).toSet(), hasLength(5));
     for (final p in DcsProfiles.all) {
       expect(DcsProfiles.byId(p.id), same(p));
       expect(DcsProfiles.forProject(p.storedVendor, p.storedBlock), same(p));
